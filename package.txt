@@ -5,3 +5,10 @@ libxrender-dev
 libglib2.0-0
 libgtk-3-0
 libgl1-mesa-glx
+libglib2.0-0
+libxrender1
+libfontconfig1
+libice6
+libglu1-mesa
+freeglut3-dev
+libglew-dev
