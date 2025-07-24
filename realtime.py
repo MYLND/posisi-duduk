@@ -12,7 +12,7 @@ import av
 
 # Page configuration
 st.set_page_config(
-    page_title="Pose Detection & Classification",
+    page_title="Deteksi dan Klasifikasi Pose",
     page_icon="🤸‍♂️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -68,8 +68,8 @@ st.markdown("""
 
 # Constants
 CLASS_LABELS = {
-    0: "Bad Posture",
-    1: "Good Posture"
+    0: "Postur Buruk",
+    1: "Postur Baik"
 }
 
 COLORS = {
@@ -80,8 +80,8 @@ COLORS = {
 KEYPOINT_CONNECTIONS = [(0, 1), (1, 2)]
 
 # Header
-st.markdown('<h1 class="main-header">Pose Detection & Classification</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Analyze posture with AI-powered pose detection using YOLO v8</p>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">Deteksi dan Klasifikasi Pose</h1>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Analisis postur tubuh dengan deteksi pose bertenaga AI menggunakan YOLO v8</p>', unsafe_allow_html=True)
 
 # WebRTC Configuration
 RTC_CONFIGURATION = RTCConfiguration({
@@ -93,25 +93,25 @@ RTC_CONFIGURATION = RTCConfiguration({
 
 # Sidebar Configuration
 with st.sidebar:
-    st.header("Configuration")
+    st.header("Konfigurasi")
     
     # Model settings
-    st.subheader("Detection Settings")
-    confidence_threshold = st.slider("Confidence Threshold", 0.1, 1.0, 0.5, 0.05)
-    image_size = st.selectbox("Image Size", [320, 640, 1280], index=1)
+    st.subheader("Pengaturan Deteksi")
+    confidence_threshold = st.slider("Ambang Batas Kepercayaan", 0.1, 1.0, 0.5, 0.05)
+    image_size = st.selectbox("Ukuran Gambar", [320, 640, 1280], index=1)
     
     # Display settings
-    st.subheader("Display Options")
-    show_keypoints = st.checkbox("Show Keypoints", value=True)
-    show_connections = st.checkbox("Show Connections", value=True)
-    show_angles = st.checkbox("Show Angles", value=True)
-    show_confidence = st.checkbox("Show Confidence", value=True)
+    st.subheader("Opsi Tampilan")
+    show_keypoints = st.checkbox("Tampilkan Titik Kunci", value=True)
+    show_connections = st.checkbox("Tampilkan Koneksi", value=True)
+    show_angles = st.checkbox("Tampilkan Sudut", value=True)
+    show_confidence = st.checkbox("Tampilkan Kepercayaan", value=True)
     
     # Advanced settings
-    with st.expander("Advanced Settings"):
-        keypoint_threshold = st.slider("Keypoint Confidence", 0.1, 1.0, 0.5, 0.05)
-        line_thickness = st.slider("Line Thickness", 1, 5, 2)
-        text_scale = st.slider("Text Scale", 0.3, 1.0, 0.6, 0.1)
+    with st.expander("Pengaturan Lanjutan"):
+        keypoint_threshold = st.slider("Kepercayaan Titik Kunci", 0.1, 1.0, 0.5, 0.05)
+        line_thickness = st.slider("Ketebalan Garis", 1, 5, 2)
+        text_scale = st.slider("Skala Teks", 0.3, 1.0, 0.6, 0.1)
 
 # Model loading
 @st.cache_resource
@@ -119,11 +119,11 @@ def load_model():
     model_path = "model/best.pt"
     
     if not os.path.exists(model_path):
-        st.error("Model file not found: " + model_path)
-        st.info("Please ensure the model file exists in the correct directory")
+        st.error("File model tidak ditemukan: " + model_path)
+        st.info("Pastikan file model ada di direktori yang benar")
         return None
     
-    with st.spinner("Loading YOLO model..."):
+    with st.spinner("Memuat model YOLO..."):
         return YOLO(model_path)
 
 # Load model
@@ -132,7 +132,7 @@ model = load_model()
 if model is None:
     st.stop()
 
-st.sidebar.success("Model loaded successfully!")
+st.sidebar.success("Model berhasil dimuat!")
 
 def calculate_angle(a, b, c):
     if None in (a, b, c):
@@ -270,7 +270,7 @@ class PoseDetectionTransformer(VideoTransformerBase):
         
         # Count posture types
         for result in pose_results:
-            if result['label'] == 'Good Posture':
+            if result['label'] == 'Postur Baik':
                 self.good_posture_count += 1
             else:
                 self.bad_posture_count += 1
@@ -296,7 +296,7 @@ def process_video(video_path):
     cap = cv2.VideoCapture(video_path)
     
     if not cap.isOpened():
-        st.error("Could not open video file")
+        st.error("Tidak dapat membuka file video")
         return
     
     # Get video properties
@@ -309,9 +309,9 @@ def process_video(video_path):
     with col1:
         st.metric("FPS", fps)
     with col2:
-        st.metric("Total Frames", total_frames)
+        st.metric("Total Frame", total_frames)
     with col3:
-        st.metric("Duration", f"{duration:.1f}s")
+        st.metric("Durasi", f"{duration:.1f}s")
     
     # Create placeholders
     video_placeholder = st.empty()
@@ -337,7 +337,7 @@ def process_video(video_path):
         # Update statistics
         total_detections += detection_count
         for result in pose_results:
-            if result['label'] == 'Good Posture':
+            if result['label'] == 'Postur Baik':
                 good_posture_count += 1
             else:
                 bad_posture_count += 1
@@ -354,38 +354,38 @@ def process_video(video_path):
         # Update status
         elapsed_time = time.time() - start_time
         processing_fps = frame_count / elapsed_time if elapsed_time > 0 else 0
-        status_text.text(f"Processing frame {frame_count}/{total_frames} | {processing_fps:.1f} FPS")
+        status_text.text(f"Memproses frame {frame_count}/{total_frames} | {processing_fps:.1f} FPS")
     
     cap.release()
     
     # Final statistics
-    st.success("Video processing completed!")
+    st.success("Pemrosesan video selesai!")
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total Detections", total_detections)
+        st.metric("Total Deteksi", total_detections)
     with col2:
-        st.metric("Good Posture", good_posture_count)
+        st.metric("Postur Baik", good_posture_count)
     with col3:
-        st.metric("Bad Posture", bad_posture_count)
+        st.metric("Postur Buruk", bad_posture_count)
     with col4:
         accuracy = (good_posture_count / (good_posture_count + bad_posture_count)) * 100 if (good_posture_count + bad_posture_count) > 0 else 0
-        st.metric("Good Posture %", f"{accuracy:.1f}%")
+        st.metric("Persentase Postur Baik", f"{accuracy:.1f}%")
 
 # Main Interface
 st.markdown("---")
 
 # Create tabs for different input methods
-tab1, tab2, tab3 = st.tabs(["Image Upload", "Real-time Webcam", "Video Upload"])
+tab1, tab2, tab3 = st.tabs(["Unggah Gambar", "Webcam Real-time", "Unggah Video"])
 
 # Tab 1: Image Upload
 with tab1:
-    st.subheader("Upload Image for Pose Detection")
+    st.subheader("Unggah Gambar untuk Deteksi Pose")
     
     uploaded_image = st.file_uploader(
-        "Choose an image file",
+        "Pilih file gambar",
         type=['jpg', 'jpeg', 'png', 'bmp', 'tiff'],
-        help="Upload an image containing people for pose detection and classification"
+        help="Unggah gambar yang berisi orang untuk deteksi dan klasifikasi pose"
     )
     
     if uploaded_image is not None:
@@ -394,61 +394,61 @@ with tab1:
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("**Original Image**")
+            st.markdown("**Gambar Asli**")
             st.image(image, use_container_width=True)
             
             # Image info
             st.markdown(f"""
             <div class="info-box">
-                <strong>Image Information:</strong><br>
-                Size: {image.size[0]} x {image.size[1]} pixels<br>
+                <strong>Informasi Gambar:</strong><br>
+                Ukuran: {image.size[0]} x {image.size[1]} piksel<br>
                 Mode: {image.mode}<br>
                 Format: {image.format}<br>
-                File size: {uploaded_image.size / 1024:.1f} KB
+                Ukuran file: {uploaded_image.size / 1024:.1f} KB
             </div>
             """, unsafe_allow_html=True)
         
         with col2:
-            if st.button("Analyze Pose", type="primary"):
-                with st.spinner("Analyzing pose..."):
+            if st.button("Analisis Pose", type="primary"):
+                with st.spinner("Menganalisis pose..."):
                     processed_image, detection_count, pose_results = process_image(image)
                 
-                st.markdown("**Processed Result**")
+                st.markdown("**Hasil Pemrosesan**")
                 st.image(processed_image, use_container_width=True)
                 
                 # Results summary
                 if detection_count > 0:
                     st.markdown(f"""
                     <div class="success-box">
-                        <strong>Analysis Complete!</strong><br>
-                        Detected poses: {detection_count}<br>
-                        Processing successful
+                        <strong>Analisis Selesai!</strong><br>
+                        Pose terdeteksi: {detection_count}<br>
+                        Pemrosesan berhasil
                     </div>
                     """, unsafe_allow_html=True)
                     
                     # Detailed results
-                    with st.expander("Detailed Results"):
+                    with st.expander("Hasil Detail"):
                         for i, result in enumerate(pose_results, 1):
-                            st.write(f"**Person {i}:**")
-                            st.write(f"- Classification: {result['label']}")
-                            st.write(f"- Confidence: {result['confidence']:.2%}")
+                            st.write(f"**Orang {i}:**")
+                            st.write(f"- Klasifikasi: {result['label']}")
+                            st.write(f"- Kepercayaan: {result['confidence']:.2%}")
                             st.write("---")
                 else:
-                    st.warning("No poses detected in the image. Try adjusting the confidence threshold.")
+                    st.warning("Tidak ada pose yang terdeteksi dalam gambar. Coba sesuaikan ambang batas kepercayaan.")
 
 # Tab 2: Real-time Webcam with WebRTC
 with tab2:
-    st.subheader("Real-time Webcam Pose Detection")
+    st.subheader("Deteksi Pose Webcam Real-time")
     
     # Instructions
     st.markdown("""
     <div class="info-box">
-        <strong>WebRTC Webcam Instructions:</strong><br>
-        1. Click "START" to begin webcam streaming<br>
-        2. Allow camera access when prompted by your browser<br>
-        3. Position yourself in front of the camera<br>
-        4. The AI will analyze your posture in real-time<br>
-        5. Click "STOP" to end the session
+        <strong>Petunjuk Webcam WebRTC:</strong><br>
+        1. Klik "START" untuk memulai streaming webcam<br>
+        2. Izinkan akses kamera ketika diminta oleh browser<br>
+        3. Posisikan diri Anda di depan kamera<br>
+        4. AI akan menganalisis postur Anda secara real-time<br>
+        5. Klik "STOP" untuk mengakhiri sesi
     </div>
     """, unsafe_allow_html=True)
     
@@ -473,13 +473,13 @@ with tab2:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Frame Count", webrtc_ctx.video_transformer.frame_count)
+            st.metric("Jumlah Frame", webrtc_ctx.video_transformer.frame_count)
         with col2:
-            st.metric("Current Detections", webrtc_ctx.video_transformer.detection_count)
+            st.metric("Deteksi Saat Ini", webrtc_ctx.video_transformer.detection_count)
         with col3:
-            st.metric("Good Posture Total", webrtc_ctx.video_transformer.good_posture_count)
+            st.metric("Total Postur Baik", webrtc_ctx.video_transformer.good_posture_count)
         with col4:
-            st.metric("Bad Posture Total", webrtc_ctx.video_transformer.bad_posture_count)
+            st.metric("Total Postur Buruk", webrtc_ctx.video_transformer.bad_posture_count)
         
         # Session statistics
         total_postures = webrtc_ctx.video_transformer.good_posture_count + webrtc_ctx.video_transformer.bad_posture_count
@@ -488,35 +488,35 @@ with tab2:
             
             st.markdown(f"""
             <div class="success-box">
-                <strong>Session Summary:</strong><br>
-                Good Posture Rate: {good_percentage:.1f}%<br>
-                Total Frames Processed: {webrtc_ctx.video_transformer.frame_count}<br>
-                Total Posture Detections: {total_postures}
+                <strong>Ringkasan Sesi:</strong><br>
+                Tingkat Postur Baik: {good_percentage:.1f}%<br>
+                Total Frame Diproses: {webrtc_ctx.video_transformer.frame_count}<br>
+                Total Deteksi Postur: {total_postures}
             </div>
             """, unsafe_allow_html=True)
 
 # Tab 3: Video Upload
 with tab3:
-    st.subheader("Upload Video for Pose Detection")
+    st.subheader("Unggah Video untuk Deteksi Pose")
     
     uploaded_video = st.file_uploader(
-        "Choose a video file",
+        "Pilih file video",
         type=['mp4', 'avi', 'mov', 'mkv', 'wmv'],
-        help="Upload a video file for batch pose detection and analysis"
+        help="Unggah file video untuk analisis deteksi pose secara batch"
     )
     
     if uploaded_video is not None:
         # Video info
         st.markdown(f"""
         <div class="info-box">
-            <strong>Video Information:</strong><br>
-            Filename: {uploaded_video.name}<br>
-            File size: {uploaded_video.size / (1024*1024):.2f} MB<br>
-            Type: {uploaded_video.type}
+            <strong>Informasi Video:</strong><br>
+            Nama file: {uploaded_video.name}<br>
+            Ukuran file: {uploaded_video.size / (1024*1024):.2f} MB<br>
+            Tipe: {uploaded_video.type}
         </div>
         """, unsafe_allow_html=True)
         
-        if st.button("Process Video", type="primary"):
+        if st.button("Proses Video", type="primary"):
             # Save uploaded file temporarily
             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tfile:
                 tfile.write(uploaded_video.read())
@@ -530,49 +530,49 @@ with tab3:
 
 # Tips Section
 st.markdown("---")
-st.subheader("Tips for Better Pose Detection")
+st.subheader("Tips untuk Deteksi Pose yang Lebih Baik")
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("""
-    **Camera Setup**
-    - Ensure good lighting
-    - Position camera at eye level
-    - Keep 1-2 meter distance
-    - Avoid busy backgrounds
+    **Pengaturan Kamera**
+    - Pastikan pencahayaan yang baik
+    - Posisikan kamera setinggi mata
+    - Jaga jarak 1-2 meter
+    - Hindari latar belakang yang sibuk
     """)
 
 with col2:
     st.markdown("""
-    **Detection Tips**
-    - Sit upright for better detection
-    - Wear contrasting clothing
-    - Avoid loose/baggy clothes
-    - Stay within camera frame
+    **Tips Deteksi**
+    - Duduk tegak untuk deteksi yang lebih baik
+    - Kenakan pakaian dengan warna kontras
+    - Hindari pakaian longgar/kebesaran
+    - Tetap berada dalam frame kamera
     """)
 
 with col3:
     st.markdown("""
-    **Settings**
-    - Lower confidence for sensitivity
-    - Adjust image size for performance
-    - Toggle display options as needed
-    - Check advanced settings
+    **Pengaturan**
+    - Turunkan kepercayaan untuk sensitivitas
+    - Sesuaikan ukuran gambar untuk performa
+    - Toggle opsi tampilan sesuai kebutuhan
+    - Periksa pengaturan lanjutan
     """)
 
 # Footer
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 10px; margin-top: 2rem;'>
-    <h4 style='color: #2c3e50; margin-bottom: 1rem;'>AI-Powered Pose Detection System</h4>
+    <h4 style='color: #2c3e50; margin-bottom: 1rem;'>Sistem Deteksi Pose Bertenaga AI</h4>
     <div style='display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;'>
-        <div><strong>Technology:</strong> YOLO v8 + OpenCV + Streamlit + WebRTC</div>
-        <div><strong>Model:</strong> Custom trained pose classification</div>
-        <div><strong>Features:</strong> Real-time webcam support</div>
+        <div><strong>Teknologi:</strong> YOLO v8 + OpenCV + Streamlit + WebRTC</div>
+        <div><strong>Model:</strong> Klasifikasi pose hasil pelatihan khusus</div>
+        <div><strong>Fitur:</strong> Dukungan webcam real-time</div>
     </div>
     <p style='margin-top: 1rem; color: #7f8c8d; font-style: italic;'>
-        Analyze human posture with state-of-the-art AI technology
+        Analisis postur manusia dengan teknologi AI mutakhir
     </p>
 </div>
 """, unsafe_allow_html=True)
