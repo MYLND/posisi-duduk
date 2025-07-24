@@ -5,3 +5,5 @@ ultralytics
 torch
 torchvision
 pillow
+streamlit-webrtc
+aiortc
