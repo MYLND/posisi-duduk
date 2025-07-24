@@ -7,3 +7,4 @@ torchvision
 pillow
 streamlit-webrtc
 aiortc
+requests
