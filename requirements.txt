@@ -1,4 +1,10 @@
+# Python 3.13 compatible versions
 streamlit
-opencv-python-headless==4.5.5.64
-numpy==1.21.6
-pillow==9.5.0
+numpy
+opencv-python-headless
+ultralytics
+torch
+torchvision
+pillow
+streamlit-webrtc
+aiortc
