@@ -7,7 +7,8 @@ import numpy as np
 import math
 from PIL import Image
 import time
-import threading
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, RTCConfiguration
+import av
 
 # Page configuration
 st.set_page_config(
@@ -82,31 +83,17 @@ KEYPOINT_CONNECTIONS = [(0, 1), (1, 2)]
 st.markdown('<h1 class="main-header">Pose Detection & Classification</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Analyze posture with AI-powered pose detection using YOLO v8</p>', unsafe_allow_html=True)
 
-# Check if running locally
-def is_running_locally():
-    """Check if the app is running on localhost"""
-    import streamlit.web.server.server as streamlit_server
-    try:
-        # Try to get the server instance
-        server = streamlit_server.Server.get_current()
-        if server:
-            return 'localhost' in str(server._host) or '127.0.0.1' in str(server._host)
-    except:
-        pass
-    return False
-
-# Detect environment
-IS_LOCAL = is_running_locally()
+# WebRTC Configuration
+RTC_CONFIGURATION = RTCConfiguration({
+    "iceServers": [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+    ]
+})
 
 # Sidebar Configuration
 with st.sidebar:
     st.header("Configuration")
-    
-    # Environment info
-    if IS_LOCAL:
-        st.success("🟢 Running locally - Webcam available")
-    else:
-        st.warning("🟡 Running on cloud - Webcam not available")
     
     # Model settings
     st.subheader("Detection Settings")
@@ -237,7 +224,7 @@ def draw_pose_with_label(frame, keypoints_obj, label, box, conf_score):
 
     return frame
 
-def process_frame(frame):
+def process_frame_detection(frame):
     results = model.predict(frame, imgsz=image_size, conf=confidence_threshold, save=False, verbose=False)
 
     detection_count = 0
@@ -263,6 +250,33 @@ def process_frame(frame):
 
     return frame, detection_count, pose_results
 
+# WebRTC Video Transformer Class
+class PoseDetectionTransformer(VideoTransformerBase):
+    def __init__(self):
+        self.frame_count = 0
+        self.detection_count = 0
+        self.good_posture_count = 0
+        self.bad_posture_count = 0
+    
+    def transform(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        
+        # Process frame with pose detection
+        processed_img, detection_count, pose_results = process_frame_detection(img)
+        
+        # Update statistics
+        self.frame_count += 1
+        self.detection_count = detection_count
+        
+        # Count posture types
+        for result in pose_results:
+            if result['label'] == 'Good Posture':
+                self.good_posture_count += 1
+            else:
+                self.bad_posture_count += 1
+        
+        return processed_img
+
 def process_image(image):
     if isinstance(image, Image.Image):
         image_array = np.array(image)
@@ -273,7 +287,7 @@ def process_image(image):
     else:
         frame = image
     
-    processed_frame, detection_count, pose_results = process_frame(frame)
+    processed_frame, detection_count, pose_results = process_frame_detection(frame)
     processed_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
     
     return processed_rgb, detection_count, pose_results
@@ -318,7 +332,7 @@ def process_video(video_path):
         if not ret:
             break
         
-        processed_frame, detection_count, pose_results = process_frame(frame)
+        processed_frame, detection_count, pose_results = process_frame_detection(frame)
         
         # Update statistics
         total_detections += detection_count
@@ -358,18 +372,11 @@ def process_video(video_path):
         accuracy = (good_posture_count / (good_posture_count + bad_posture_count)) * 100 if (good_posture_count + bad_posture_count) > 0 else 0
         st.metric("Good Posture %", f"{accuracy:.1f}%")
 
-def check_webcam_availability():
-    """Check if webcam is available"""
-    cap = cv2.VideoCapture(0)
-    is_available = cap.isOpened()
-    cap.release()
-    return is_available
-
 # Main Interface
 st.markdown("---")
 
 # Create tabs for different input methods
-tab1, tab2, tab3 = st.tabs(["Image Upload", "Webcam", "Video Upload"])
+tab1, tab2, tab3 = st.tabs(["Image Upload", "Real-time Webcam", "Video Upload"])
 
 # Tab 1: Image Upload
 with tab1:
@@ -429,112 +436,64 @@ with tab1:
                 else:
                     st.warning("No poses detected in the image. Try adjusting the confidence threshold.")
 
-# Tab 2: Webcam
+# Tab 2: Real-time Webcam with WebRTC
 with tab2:
     st.subheader("Real-time Webcam Pose Detection")
     
-    # Check environment and webcam availability
-    if not IS_LOCAL:
-        st.markdown("""
-        <div class="warning-box">
-            <strong>⚠️ Webcam Not Available in Cloud Deployment</strong><br><br>
-            Webcam functionality only works when running the application locally due to browser security restrictions.<br><br>
-            <strong>To use webcam:</strong><br>
-            1. Clone the repository: <code>git clone https://github.com/tayyy03/duduk.git</code><br>
-            2. Install dependencies: <code>pip install -r requirements.txt</code><br>
-            3. Run locally: <code>streamlit run app.py</code><br>
-            4. Open in browser: <code>http://localhost:8501</code>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Show demo placeholder
-        demo_img = np.zeros((400, 600, 3), dtype=np.uint8)
-        cv2.putText(demo_img, "Webcam Demo", (150, 180), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 3)
-        cv2.putText(demo_img, "Run locally to enable", (120, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (128, 128, 128), 2)
-        st.image(demo_img, channels="BGR", caption="Webcam placeholder - Available only in local development")
-        
-    else:
-        # Local environment - full webcam functionality
-        col1, col2 = st.columns([1, 3])
+    # Instructions
+    st.markdown("""
+    <div class="info-box">
+        <strong>🎥 WebRTC Webcam Instructions:</strong><br>
+        1. Click "START" to begin webcam streaming<br>
+        2. Allow camera access when prompted by your browser<br>
+        3. Position yourself in front of the camera<br>
+        4. The AI will analyze your posture in real-time<br>
+        5. Click "STOP" to end the session
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # WebRTC Streamer
+    webrtc_ctx = webrtc_streamer(
+        key="pose-detection",
+        video_transformer_factory=PoseDetectionTransformer,
+        rtc_configuration=RTC_CONFIGURATION,
+        media_stream_constraints={
+            "video": {
+                "width": {"ideal": 640},
+                "height": {"ideal": 480},
+                "frameRate": {"ideal": 30}
+            },
+            "audio": False
+        },
+        async_processing=True,
+    )
+    
+    # Real-time statistics
+    if webrtc_ctx.video_transformer:
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.markdown("**Controls**")
-            
-            # Check webcam availability
-            webcam_available = check_webcam_availability()
-            
-            if webcam_available:
-                run_webcam = st.checkbox("Start Webcam")
-                
-                if run_webcam:
-                    st.markdown('<div class="success-box"><strong>Webcam Active</strong><br>Uncheck to stop</div>', unsafe_allow_html=True)
-                
-                # Real-time statistics placeholders
-                if run_webcam:
-                    st.markdown("**Real-time Stats**")
-                    fps_placeholder = st.empty()
-                    detection_placeholder = st.empty()
-            else:
-                run_webcam = False
-                st.error("Webcam not detected. Please check if your camera is connected and not being used by another application.")
-                
+            st.metric("Frame Count", webrtc_ctx.video_transformer.frame_count)
         with col2:
-            webcam_placeholder = st.empty()
+            st.metric("Current Detections", webrtc_ctx.video_transformer.detection_count)
+        with col3:
+            st.metric("Good Posture Total", webrtc_ctx.video_transformer.good_posture_count)
+        with col4:
+            st.metric("Bad Posture Total", webrtc_ctx.video_transformer.bad_posture_count)
+        
+        # Session statistics
+        total_postures = webrtc_ctx.video_transformer.good_posture_count + webrtc_ctx.video_transformer.bad_posture_count
+        if total_postures > 0:
+            good_percentage = (webrtc_ctx.video_transformer.good_posture_count / total_postures) * 100
             
-            if webcam_available and run_webcam:
-                # Initialize session state for webcam control
-                if 'webcam_running' not in st.session_state:
-                    st.session_state.webcam_running = False
-                
-                # Start webcam processing
-                cap = cv2.VideoCapture(0)
-                
-                if cap.isOpened():
-                    # Set camera properties for better performance
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                    cap.set(cv2.CAP_PROP_FPS, 30)
-                    
-                    frame_count = 0
-                    start_time = time.time()
-                    
-                    # Webcam loop with proper control
-                    while run_webcam:
-                        ret, frame = cap.read()
-                        if not ret:
-                            st.error("Failed to read from webcam")
-                            break
-                        
-                        # Process frame
-                        processed_frame, detection_count, pose_results = process_frame(frame)
-                        
-                        # Convert to RGB for display
-                        frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-                        webcam_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
-                        
-                        # Update stats
-                        frame_count += 1
-                        elapsed_time = time.time() - start_time
-                        current_fps = frame_count / elapsed_time if elapsed_time > 0 else 0
-                        
-                        fps_placeholder.metric("FPS", f"{current_fps:.1f}")
-                        detection_placeholder.metric("Detections", detection_count)
-                        
-                        # Small delay to prevent overwhelming
-                        time.sleep(0.03)  # ~30 FPS
-                        
-                        # Check if user stopped webcam
-                        if not run_webcam:
-                            break
-                
-                cap.release()
-            
-            elif not webcam_available:
-                # Show error state
-                error_img = np.zeros((400, 600, 3), dtype=np.uint8)
-                cv2.putText(error_img, "No Webcam Detected", (120, 180), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
-                cv2.putText(error_img, "Check camera connection", (140, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (128, 128, 128), 2)
-                webcam_placeholder.image(error_img, channels="BGR")
+            st.markdown(f"""
+            <div class="success-box">
+                <strong>Session Summary:</strong><br>
+                Good Posture Rate: {good_percentage:.1f}%<br>
+                Total Frames Processed: {webrtc_ctx.video_transformer.frame_count}<br>
+                Total Posture Detections: {total_postures}
+            </div>
+            """, unsafe_allow_html=True)
 
 # Tab 3: Video Upload
 with tab3:
@@ -569,6 +528,39 @@ with tab3:
             if os.path.exists(temp_video_path):
                 os.unlink(temp_video_path)
 
+# Tips Section
+st.markdown("---")
+st.subheader("💡 Tips for Better Pose Detection")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown("""
+    **📷 Camera Setup**
+    - Ensure good lighting
+    - Position camera at eye level
+    - Keep 1-2 meter distance
+    - Avoid busy backgrounds
+    """)
+
+with col2:
+    st.markdown("""
+    **🎯 Detection Tips**
+    - Sit upright for better detection
+    - Wear contrasting clothing
+    - Avoid loose/baggy clothes
+    - Stay within camera frame
+    """)
+
+with col3:
+    st.markdown("""
+    **⚙️ Settings**
+    - Lower confidence for sensitivity
+    - Adjust image size for performance
+    - Toggle display options as needed
+    - Check advanced settings
+    """)
+
 # Footer
 st.markdown("---")
 st.markdown("""
@@ -576,11 +568,11 @@ st.markdown("""
     <h4 style='color: #2c3e50; margin-bottom: 1rem;'>AI-Powered Pose Detection System</h4>
     <div style='display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;'>
         <div><strong>Repository:</strong> <a href="https://github.com/tayyy03/duduk" target="_blank">github.com/tayyy03/duduk</a></div>
-        <div><strong>Technology:</strong> YOLO v8 + OpenCV + Streamlit</div>
+        <div><strong>Technology:</strong> YOLO v8 + OpenCV + Streamlit + WebRTC</div>
         <div><strong>Model:</strong> Custom trained pose classification</div>
     </div>
     <p style='margin-top: 1rem; color: #7f8c8d; font-style: italic;'>
-        Analyze human posture with state-of-the-art AI technology
+        Analyze human posture with state-of-the-art AI technology - Now with real-time webcam support!
     </p>
 </div>
 """, unsafe_allow_html=True)
