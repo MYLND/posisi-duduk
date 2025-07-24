@@ -5,125 +5,582 @@ import tempfile
 import os
 import numpy as np
 import math
+from PIL import Image
+import time
+import threading
 
+# Page configuration
+st.set_page_config(
+    page_title="Pose Detection & Classification",
+    page_icon="🤸‍♂️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS
+st.markdown("""
+<style>
+    .main-header {
+        text-align: center;
+        background: linear-gradient(90deg, #FF6B6B, #4ECDC4);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-size: 3rem;
+        font-weight: bold;
+        margin-bottom: 0.5rem;
+    }
+    .sub-header {
+        text-align: center;
+        color: #666;
+        font-size: 1.2rem;
+        margin-bottom: 2rem;
+    }
+    .metric-card {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 4px solid #4ECDC4;
+    }
+    .info-box {
+        background-color: #e8f4fd;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 4px solid #3498db;
+        margin: 1rem 0;
+    }
+    .success-box {
+        background-color: #d4edda;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 4px solid #28a745;
+        margin: 1rem 0;
+    }
+    .warning-box {
+        background-color: #fff3cd;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 4px solid #ffc107;
+        margin: 1rem 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Constants
 CLASS_LABELS = {
-    0: "Bad",
-    1: "Good"
+    0: "Bad Posture",
+    1: "Good Posture"
 }
 
 COLORS = {
-    0: (0, 255, 0),  # Bad → hijau
-    1: (255, 0, 0),  # Good → biru
+    0: (0, 255, 0),
+    1: (255, 0, 0),
 }
 
-KEYPOINT_CONNECTIONS = [(0, 1), (1, 2)]  
+KEYPOINT_CONNECTIONS = [(0, 1), (1, 2)]
 
+# Header
+st.markdown('<h1 class="main-header">Pose Detection & Classification</h1>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Analyze posture with AI-powered pose detection using YOLO v8</p>', unsafe_allow_html=True)
+
+# Check if running locally
+def is_running_locally():
+    """Check if the app is running on localhost"""
+    import streamlit.web.server.server as streamlit_server
+    try:
+        # Try to get the server instance
+        server = streamlit_server.Server.get_current()
+        if server:
+            return 'localhost' in str(server._host) or '127.0.0.1' in str(server._host)
+    except:
+        pass
+    return False
+
+# Detect environment
+IS_LOCAL = is_running_locally()
+
+# Sidebar Configuration
+with st.sidebar:
+    st.header("Configuration")
+    
+    # Environment info
+    if IS_LOCAL:
+        st.success("🟢 Running locally - Webcam available")
+    else:
+        st.warning("🟡 Running on cloud - Webcam not available")
+    
+    # Model settings
+    st.subheader("Detection Settings")
+    confidence_threshold = st.slider("Confidence Threshold", 0.1, 1.0, 0.5, 0.05)
+    image_size = st.selectbox("Image Size", [320, 640, 1280], index=1)
+    
+    # Display settings
+    st.subheader("Display Options")
+    show_keypoints = st.checkbox("Show Keypoints", value=True)
+    show_connections = st.checkbox("Show Connections", value=True)
+    show_angles = st.checkbox("Show Angles", value=True)
+    show_confidence = st.checkbox("Show Confidence", value=True)
+    
+    # Advanced settings
+    with st.expander("Advanced Settings"):
+        keypoint_threshold = st.slider("Keypoint Confidence", 0.1, 1.0, 0.5, 0.05)
+        line_thickness = st.slider("Line Thickness", 1, 5, 2)
+        text_scale = st.slider("Text Scale", 0.3, 1.0, 0.6, 0.1)
+
+# Model loading
 @st.cache_resource
 def load_model():
-    return YOLO("pose2/train2/weights/best.pt")  
+    model_path = "pose2/train2/weights/best.pt"
+    
+    if not os.path.exists(model_path):
+        st.error("Model file not found: " + model_path)
+        st.info("Please ensure the model file exists in the correct directory")
+        return None
+    
+    with st.spinner("Loading YOLO model..."):
+        return YOLO(model_path)
 
+# Load model
 model = load_model()
 
-st.title("Deteksi Pose & Tracking dengan Sudut (3 Keypoints)")
-source = st.radio("Pilih sumber input:", ["Webcam", "Upload Video"])
+if model is None:
+    st.stop()
+
+st.sidebar.success("Model loaded successfully!")
 
 def calculate_angle(a, b, c):
     if None in (a, b, c):
         return None
+    
     ba = np.array(a) - np.array(b)
     bc = np.array(c) - np.array(b)
+    
     cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
     angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
     return np.degrees(angle)
 
-def draw_pose_with_label(frame, keypoints_obj, label, box):
+def draw_pose_with_label(frame, keypoints_obj, label, box, conf_score):
     color = COLORS.get(label, (255, 255, 255))
+    label_text = CLASS_LABELS.get(label, "Unknown")
 
-    try:
-        keypoints = keypoints_obj.xy[0].cpu().numpy()
-        confs = keypoints_obj.conf[0].cpu().numpy()
-    except Exception as e:
-        print("Keypoint error:", e)
-        return frame
+    keypoints = keypoints_obj.xy[0].cpu().numpy()
+    confs = keypoints_obj.conf[0].cpu().numpy()
 
+    # Draw keypoints
     pts = []
     for i, (x, y) in enumerate(keypoints):
-        if confs[i] > 0.5:
+        if i < len(confs) and confs[i] > keypoint_threshold:
             pt = (int(x), int(y))
             pts.append(pt)
-            cv2.circle(frame, pt, 4, (0, 0, 255), -1)
+            
+            if show_keypoints:
+                cv2.circle(frame, pt, 5, (0, 0, 255), -1)
+                cv2.circle(frame, pt, 6, (255, 255, 255), 2)
         else:
             pts.append(None)
 
-    for i, j in KEYPOINT_CONNECTIONS:
-        if i < len(pts) and j < len(pts):
-            if pts[i] and pts[j]:
-                cv2.line(frame, pts[i], pts[j], color, 2)
-    if len(pts) >= 3 and all(pts[k] for k in [0, 1, 2]):
+    # Draw connections
+    if show_connections:
+        for i, j in KEYPOINT_CONNECTIONS:
+            if i < len(pts) and j < len(pts) and pts[i] and pts[j]:
+                cv2.line(frame, pts[i], pts[j], color, line_thickness)
+
+    # Calculate and display angle
+    if show_angles and len(pts) >= 3 and all(pts[k] for k in [0, 1, 2]):
         angle = calculate_angle(pts[0], pts[1], pts[2])
         if angle is not None:
             pos = pts[1]
-            cv2.putText(frame, f"{int(angle)}°", (pos[0] + 5, pos[1] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            angle_text = f"{int(angle)}°"
+            
+            (text_width, text_height), _ = cv2.getTextSize(
+                angle_text, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 2
+            )
+            cv2.rectangle(
+                frame, 
+                (pos[0] + 5, pos[1] - text_height - 15), 
+                (pos[0] + text_width + 10, pos[1] - 5), 
+                (0, 0, 0), 
+                -1
+            )
+            
+            cv2.putText(
+                frame, angle_text, 
+                (pos[0] + 8, pos[1] - 10),
+                cv2.FONT_HERSHEY_SIMPLEX, text_scale, (0, 255, 255), 2
+            )
+
+    # Draw bounding box and label
     if box is not None:
         x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
+        
+        # Draw bounding box
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(frame, CLASS_LABELS.get(label, "Unknown"), (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        
+        # Prepare label text
+        display_text = label_text
+        if show_confidence:
+            display_text += f" ({conf_score:.2f})"
+        
+        # Background for label
+        (text_width, text_height), _ = cv2.getTextSize(
+            display_text, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 2
+        )
+        cv2.rectangle(
+            frame, (x1, y1 - text_height - 10), 
+            (x1 + text_width + 10, y1), color, -1
+        )
+        
+        # Label text
+        cv2.putText(
+            frame, display_text, (x1 + 5, y1 - 5),
+            cv2.FONT_HERSHEY_SIMPLEX, text_scale, (255, 255, 255), 2
+        )
 
     return frame
 
-def infer_and_display(video_path):
-    cap = cv2.VideoCapture(video_path)
-    stframe = st.empty()
+def process_frame(frame):
+    results = model.predict(frame, imgsz=image_size, conf=confidence_threshold, save=False, verbose=False)
 
+    detection_count = 0
+    pose_results = []
+
+    for result in results:
+        boxes = result.boxes
+        kpts = result.keypoints
+        
+        if boxes is not None and kpts is not None:
+            for box, kp in zip(boxes, kpts):
+                label = int(box.cls.cpu().item())
+                conf_score = float(box.conf.cpu().item())
+                
+                frame = draw_pose_with_label(frame, kp, label, box, conf_score)
+                
+                detection_count += 1
+                pose_results.append({
+                    'label': CLASS_LABELS.get(label, 'Unknown'),
+                    'confidence': conf_score,
+                    'bbox': box.xyxy[0].cpu().numpy().tolist()
+                })
+
+    return frame, detection_count, pose_results
+
+def process_image(image):
+    if isinstance(image, Image.Image):
+        image_array = np.array(image)
+        if len(image_array.shape) == 3 and image_array.shape[2] == 3:
+            frame = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+        else:
+            frame = image_array
+    else:
+        frame = image
+    
+    processed_frame, detection_count, pose_results = process_frame(frame)
+    processed_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+    
+    return processed_rgb, detection_count, pose_results
+
+def process_video(video_path):
+    cap = cv2.VideoCapture(video_path)
+    
+    if not cap.isOpened():
+        st.error("Could not open video file")
+        return
+    
+    # Get video properties
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration = total_frames / fps if fps > 0 else 0
+    
+    # Display video info
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("FPS", fps)
+    with col2:
+        st.metric("Total Frames", total_frames)
+    with col3:
+        st.metric("Duration", f"{duration:.1f}s")
+    
+    # Create placeholders
+    video_placeholder = st.empty()
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # Statistics
+    frame_count = 0
+    total_detections = 0
+    good_posture_count = 0
+    bad_posture_count = 0
+    
+    # Process video frames
+    start_time = time.time()
+    
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
-
-        results = model.predict(frame, imgsz=640, conf=0.5, save=False)
-
-        for result in results:
-            boxes = result.boxes
-            kpts = result.keypoints
-            if boxes is not None and kpts is not None:
-                for box, kp in zip(boxes, kpts):
-                    label = int(box.cls.cpu().item())
-                    frame = draw_pose_with_label(frame, kp, label, box)
-
-        stframe.image(frame, channels="BGR", use_container_width=True)
-
+        
+        processed_frame, detection_count, pose_results = process_frame(frame)
+        
+        # Update statistics
+        total_detections += detection_count
+        for result in pose_results:
+            if result['label'] == 'Good Posture':
+                good_posture_count += 1
+            else:
+                bad_posture_count += 1
+        
+        # Display processed frame
+        frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+        video_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
+        
+        # Update progress
+        frame_count += 1
+        progress = frame_count / total_frames if total_frames > 0 else 0
+        progress_bar.progress(progress)
+        
+        # Update status
+        elapsed_time = time.time() - start_time
+        processing_fps = frame_count / elapsed_time if elapsed_time > 0 else 0
+        status_text.text(f"Processing frame {frame_count}/{total_frames} | {processing_fps:.1f} FPS")
+    
     cap.release()
+    
+    # Final statistics
+    st.success("Video processing completed!")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Detections", total_detections)
+    with col2:
+        st.metric("Good Posture", good_posture_count)
+    with col3:
+        st.metric("Bad Posture", bad_posture_count)
+    with col4:
+        accuracy = (good_posture_count / (good_posture_count + bad_posture_count)) * 100 if (good_posture_count + bad_posture_count) > 0 else 0
+        st.metric("Good Posture %", f"{accuracy:.1f}%")
 
-if source == "Webcam":
-    run = st.checkbox("Mulai Webcam")
-    if run:
-        cap = cv2.VideoCapture(0)
-        stframe = st.empty()
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
+def check_webcam_availability():
+    """Check if webcam is available"""
+    cap = cv2.VideoCapture(0)
+    is_available = cap.isOpened()
+    cap.release()
+    return is_available
 
-            results = model.predict(frame, imgsz=640, conf=0.5, save=False)
+# Main Interface
+st.markdown("---")
 
-            for result in results:
-                boxes = result.boxes
-                kpts = result.keypoints
-                if boxes is not None and kpts is not None:
-                    for box, kp in zip(boxes, kpts):
-                        label = int(box.cls.cpu().item())
-                        frame = draw_pose_with_label(frame, kp, label, box)
+# Create tabs for different input methods
+tab1, tab2, tab3 = st.tabs(["Image Upload", "Webcam", "Video Upload"])
 
-            stframe.image(frame, channels="BGR", use_container_width=True)
+# Tab 1: Image Upload
+with tab1:
+    st.subheader("Upload Image for Pose Detection")
+    
+    uploaded_image = st.file_uploader(
+        "Choose an image file",
+        type=['jpg', 'jpeg', 'png', 'bmp', 'tiff'],
+        help="Upload an image containing people for pose detection and classification"
+    )
+    
+    if uploaded_image is not None:
+        image = Image.open(uploaded_image)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Original Image**")
+            st.image(image, use_container_width=True)
+            
+            # Image info
+            st.markdown(f"""
+            <div class="info-box">
+                <strong>Image Information:</strong><br>
+                Size: {image.size[0]} x {image.size[1]} pixels<br>
+                Mode: {image.mode}<br>
+                Format: {image.format}<br>
+                File size: {uploaded_image.size / 1024:.1f} KB
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            if st.button("Analyze Pose", type="primary"):
+                with st.spinner("Analyzing pose..."):
+                    processed_image, detection_count, pose_results = process_image(image)
+                
+                st.markdown("**Processed Result**")
+                st.image(processed_image, use_container_width=True)
+                
+                # Results summary
+                if detection_count > 0:
+                    st.markdown(f"""
+                    <div class="success-box">
+                        <strong>Analysis Complete!</strong><br>
+                        Detected poses: {detection_count}<br>
+                        Processing successful
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Detailed results
+                    with st.expander("Detailed Results"):
+                        for i, result in enumerate(pose_results, 1):
+                            st.write(f"**Person {i}:**")
+                            st.write(f"- Classification: {result['label']}")
+                            st.write(f"- Confidence: {result['confidence']:.2%}")
+                            st.write("---")
+                else:
+                    st.warning("No poses detected in the image. Try adjusting the confidence threshold.")
 
-        cap.release()
+# Tab 2: Webcam
+with tab2:
+    st.subheader("Real-time Webcam Pose Detection")
+    
+    # Check environment and webcam availability
+    if not IS_LOCAL:
+        st.markdown("""
+        <div class="warning-box">
+            <strong>⚠️ Webcam Not Available in Cloud Deployment</strong><br><br>
+            Webcam functionality only works when running the application locally due to browser security restrictions.<br><br>
+            <strong>To use webcam:</strong><br>
+            1. Clone the repository: <code>git clone https://github.com/tayyy03/duduk.git</code><br>
+            2. Install dependencies: <code>pip install -r requirements.txt</code><br>
+            3. Run locally: <code>streamlit run app.py</code><br>
+            4. Open in browser: <code>http://localhost:8501</code>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Show demo placeholder
+        demo_img = np.zeros((400, 600, 3), dtype=np.uint8)
+        cv2.putText(demo_img, "Webcam Demo", (150, 180), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 3)
+        cv2.putText(demo_img, "Run locally to enable", (120, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (128, 128, 128), 2)
+        st.image(demo_img, channels="BGR", caption="Webcam placeholder - Available only in local development")
+        
+    else:
+        # Local environment - full webcam functionality
+        col1, col2 = st.columns([1, 3])
+        
+        with col1:
+            st.markdown("**Controls**")
+            
+            # Check webcam availability
+            webcam_available = check_webcam_availability()
+            
+            if webcam_available:
+                run_webcam = st.checkbox("Start Webcam")
+                
+                if run_webcam:
+                    st.markdown('<div class="success-box"><strong>Webcam Active</strong><br>Uncheck to stop</div>', unsafe_allow_html=True)
+                
+                # Real-time statistics placeholders
+                if run_webcam:
+                    st.markdown("**Real-time Stats**")
+                    fps_placeholder = st.empty()
+                    detection_placeholder = st.empty()
+            else:
+                run_webcam = False
+                st.error("Webcam not detected. Please check if your camera is connected and not being used by another application.")
+                
+        with col2:
+            webcam_placeholder = st.empty()
+            
+            if webcam_available and run_webcam:
+                # Initialize session state for webcam control
+                if 'webcam_running' not in st.session_state:
+                    st.session_state.webcam_running = False
+                
+                # Start webcam processing
+                cap = cv2.VideoCapture(0)
+                
+                if cap.isOpened():
+                    # Set camera properties for better performance
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    cap.set(cv2.CAP_PROP_FPS, 30)
+                    
+                    frame_count = 0
+                    start_time = time.time()
+                    
+                    # Webcam loop with proper control
+                    while run_webcam:
+                        ret, frame = cap.read()
+                        if not ret:
+                            st.error("Failed to read from webcam")
+                            break
+                        
+                        # Process frame
+                        processed_frame, detection_count, pose_results = process_frame(frame)
+                        
+                        # Convert to RGB for display
+                        frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                        webcam_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
+                        
+                        # Update stats
+                        frame_count += 1
+                        elapsed_time = time.time() - start_time
+                        current_fps = frame_count / elapsed_time if elapsed_time > 0 else 0
+                        
+                        fps_placeholder.metric("FPS", f"{current_fps:.1f}")
+                        detection_placeholder.metric("Detections", detection_count)
+                        
+                        # Small delay to prevent overwhelming
+                        time.sleep(0.03)  # ~30 FPS
+                        
+                        # Check if user stopped webcam
+                        if not run_webcam:
+                            break
+                
+                cap.release()
+            
+            elif not webcam_available:
+                # Show error state
+                error_img = np.zeros((400, 600, 3), dtype=np.uint8)
+                cv2.putText(error_img, "No Webcam Detected", (120, 180), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
+                cv2.putText(error_img, "Check camera connection", (140, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (128, 128, 128), 2)
+                webcam_placeholder.image(error_img, channels="BGR")
 
-else:
-    uploaded_file = st.file_uploader("Upload video", type=["mp4", "avi", "mov"])
-    if uploaded_file is not None:
-        tfile = tempfile.NamedTemporaryFile(delete=False)
-        tfile.write(uploaded_file.read())
-        infer_and_display(tfile.name)
-        os.unlink(tfile.name)
+# Tab 3: Video Upload
+with tab3:
+    st.subheader("Upload Video for Pose Detection")
+    
+    uploaded_video = st.file_uploader(
+        "Choose a video file",
+        type=['mp4', 'avi', 'mov', 'mkv', 'wmv'],
+        help="Upload a video file for batch pose detection and analysis"
+    )
+    
+    if uploaded_video is not None:
+        # Video info
+        st.markdown(f"""
+        <div class="info-box">
+            <strong>Video Information:</strong><br>
+            Filename: {uploaded_video.name}<br>
+            File size: {uploaded_video.size / (1024*1024):.2f} MB<br>
+            Type: {uploaded_video.type}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button("Process Video", type="primary"):
+            # Save uploaded file temporarily
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tfile:
+                tfile.write(uploaded_video.read())
+                temp_video_path = tfile.name
+            
+            process_video(temp_video_path)
+            
+            # Clean up temporary file
+            if os.path.exists(temp_video_path):
+                os.unlink(temp_video_path)
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style='text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 10px; margin-top: 2rem;'>
+    <h4 style='color: #2c3e50; margin-bottom: 1rem;'>AI-Powered Pose Detection System</h4>
+    <div style='display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;'>
+        <div><strong>Repository:</strong> <a href="https://github.com/tayyy03/duduk" target="_blank">github.com/tayyy03/duduk</a></div>
+        <div><strong>Technology:</strong> YOLO v8 + OpenCV + Streamlit</div>
+        <div><strong>Model:</strong> Custom trained pose classification</div>
+    </div>
+    <p style='margin-top: 1rem; color: #7f8c8d; font-style: italic;'>
+        Analyze human posture with state-of-the-art AI technology
+    </p>
+</div>
+""", unsafe_allow_html=True)
