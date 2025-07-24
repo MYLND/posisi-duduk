@@ -116,7 +116,7 @@ with st.sidebar:
 # Model loading
 @st.cache_resource
 def load_model():
-    model_path = "pose2/train2/weights/best.pt"
+    model_path = "model/best.pt"
     
     if not os.path.exists(model_path):
         st.error("Model file not found: " + model_path)
@@ -443,7 +443,7 @@ with tab2:
     # Instructions
     st.markdown("""
     <div class="info-box">
-        <strong>🎥 WebRTC Webcam Instructions:</strong><br>
+        <strong>WebRTC Webcam Instructions:</strong><br>
         1. Click "START" to begin webcam streaming<br>
         2. Allow camera access when prompted by your browser<br>
         3. Position yourself in front of the camera<br>
@@ -530,13 +530,13 @@ with tab3:
 
 # Tips Section
 st.markdown("---")
-st.subheader("💡 Tips for Better Pose Detection")
+st.subheader("Tips for Better Pose Detection")
 
 col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown("""
-    **📷 Camera Setup**
+    **Camera Setup**
     - Ensure good lighting
     - Position camera at eye level
     - Keep 1-2 meter distance
@@ -545,7 +545,7 @@ with col1:
 
 with col2:
     st.markdown("""
-    **🎯 Detection Tips**
+    **Detection Tips**
     - Sit upright for better detection
     - Wear contrasting clothing
     - Avoid loose/baggy clothes
@@ -554,7 +554,7 @@ with col2:
 
 with col3:
     st.markdown("""
-    **⚙️ Settings**
+    **Settings**
     - Lower confidence for sensitivity
     - Adjust image size for performance
     - Toggle display options as needed
@@ -567,12 +567,12 @@ st.markdown("""
 <div style='text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 10px; margin-top: 2rem;'>
     <h4 style='color: #2c3e50; margin-bottom: 1rem;'>AI-Powered Pose Detection System</h4>
     <div style='display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;'>
-        <div><strong>Repository:</strong> <a href="https://github.com/tayyy03/duduk" target="_blank">github.com/tayyy03/duduk</a></div>
         <div><strong>Technology:</strong> YOLO v8 + OpenCV + Streamlit + WebRTC</div>
         <div><strong>Model:</strong> Custom trained pose classification</div>
+        <div><strong>Features:</strong> Real-time webcam support</div>
     </div>
     <p style='margin-top: 1rem; color: #7f8c8d; font-style: italic;'>
-        Analyze human posture with state-of-the-art AI technology - Now with real-time webcam support!
+        Analyze human posture with state-of-the-art AI technology
     </p>
 </div>
 """, unsafe_allow_html=True)
