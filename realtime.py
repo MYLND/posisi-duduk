@@ -116,7 +116,7 @@ with st.sidebar:
 # Model loading
 @st.cache_resource
 def load_model():
-    model_path = "model/best.pt"
+    model_path = "pose2/train2/weights/best.pt"
     
     if not os.path.exists(model_path):
         st.error("File model tidak ditemukan: " + model_path)
