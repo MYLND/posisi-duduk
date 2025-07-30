@@ -7,8 +7,6 @@ import numpy as np
 import math
 from PIL import Image
 import time
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, RTCConfiguration
-import av
 
 # Page configuration
 st.set_page_config(
@@ -70,6 +68,14 @@ st.markdown("""
         border-left: 4px solid #dc3545;
         margin: 1rem 0;
     }
+    .camera-box {
+        background-color: #f8f9fa;
+        padding: 2rem;
+        border-radius: 15px;
+        border: 2px dashed #6c757d;
+        text-align: center;
+        margin: 2rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -90,61 +96,6 @@ KEYPOINT_CONNECTIONS = [(0, 1), (1, 2)]
 st.markdown('<h1 class="main-header">Pose Estimation</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Analisis postur tubuh dengan deteksi pose-estimation menggunakan YOLO v8</p>', unsafe_allow_html=True)
 
-# Multiple WebRTC Configurations for different network conditions
-RTC_CONFIGURATIONS = {
-    "basic": RTCConfiguration({
-        "iceServers": [
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["stun:stun1.l.google.com:19302"]},
-        ]
-    }),
-    
-    "enhanced": RTCConfiguration({
-        "iceServers": [
-            # Google STUN servers
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["stun:stun1.l.google.com:19302"]},
-            {"urls": ["stun:stun2.l.google.com:19302"]},
-            {"urls": ["stun:stun3.l.google.com:19302"]},
-            
-            # Alternative STUN servers
-            {"urls": ["stun:stun.stunprotocol.org:3478"]},
-            {"urls": ["stun:stun.cloudflare.com:3478"]},
-            {"urls": ["stun:stun.voiparound.com"]},
-            {"urls": ["stun:stun.voipbuster.com"]},
-        ],
-        "iceCandidatePoolSize": 10,
-        "iceTransportPolicy": "all",
-    }),
-    
-    "turn_enabled": RTCConfiguration({
-        "iceServers": [
-            # STUN servers
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["stun:stun.cloudflare.com:3478"]},
-            
-            # Free TURN servers for firewall bypass
-            {
-                "urls": ["turn:openrelay.metered.ca:80"],
-                "username": "openrelayproject",
-                "credential": "openrelayproject"
-            },
-            {
-                "urls": ["turn:openrelay.metered.ca:443"],
-                "username": "openrelayproject", 
-                "credential": "openrelayproject"
-            },
-            {
-                "urls": ["turn:openrelay.metered.ca:443?transport=tcp"],
-                "username": "openrelayproject",
-                "credential": "openrelayproject"
-            }
-        ],
-        "iceCandidatePoolSize": 10,
-        "iceTransportPolicy": "all",
-    })
-}
-
 # Sidebar Configuration
 with st.sidebar:
     st.header("🔧 Konfigurasi")
@@ -161,29 +112,11 @@ with st.sidebar:
     show_angles = st.checkbox("Tampilkan Sudut", value=True)
     show_confidence = st.checkbox("Tampilkan Confidence", value=True)
     
-    # WebRTC Configuration
-    st.subheader("Konfigurasi WebRTC")
-    rtc_config_option = st.selectbox(
-        "Network Configuration:",
-        ["basic", "enhanced", "turn_enabled"],
-        index=1,
-        help="""
-        - basic: STUN servers dasar (cepat)
-        - enhanced: Multiple STUN servers (recommended)
-        - turn_enabled: Dengan TURN servers (untuk firewall bypass)
-        """
-    )
-    
     # Advanced settings
     with st.expander("Pengaturan Lanjutan"):
         keypoint_threshold = st.slider("Keypoint Threshold", 0.1, 1.0, 0.5, 0.05)
         line_thickness = st.slider("Ketebalan Garis", 1, 5, 2)
         text_scale = st.slider("Skala Teks", 0.3, 1.0, 0.6, 0.1)
-        
-        # WebRTC advanced settings
-        st.markdown("**WebRTC Settings:**")
-        async_processing = st.checkbox("Async Processing", value=False, help="Enable untuk performa lebih baik, disable untuk stabilitas")
-        max_fps = st.slider("Max Frame Rate", 10, 60, 30, 5)
 
 # Model loading with error handling
 @st.cache_resource
@@ -372,48 +305,6 @@ def process_frame_detection(frame):
         st.error(f"Error in process_frame_detection: {str(e)}")
         return frame, 0, []
 
-# Enhanced WebRTC Video Transformer Class
-class PoseDetectionTransformer(VideoTransformerBase):
-    def __init__(self):
-        self.frame_count = 0
-        self.detection_count = 0
-        self.good_posture_count = 0
-        self.bad_posture_count = 0
-        self.error_count = 0
-        self.last_fps_time = time.time()
-        self.fps = 0
-    
-    def transform(self, frame):
-        try:
-            img = frame.to_ndarray(format="bgr24")
-            
-            # Process frame with pose detection
-            processed_img, detection_count, pose_results = process_frame_detection(img)
-            
-            # Update statistics
-            self.frame_count += 1
-            self.detection_count = detection_count
-            
-            # Calculate FPS
-            current_time = time.time()
-            if current_time - self.last_fps_time >= 1.0:  # Update FPS every second
-                self.fps = self.frame_count / (current_time - self.last_fps_time + 1e-6)
-                self.last_fps_time = current_time
-            
-            # Count posture types
-            for result in pose_results:
-                if result['label'] == 'Postur Baik':
-                    self.good_posture_count += 1
-                else:
-                    self.bad_posture_count += 1
-            
-            return processed_img
-        
-        except Exception as e:
-            self.error_count += 1
-            # Return original frame if processing fails
-            return frame.to_ndarray(format="bgr24")
-
 def process_image(image):
     """Process uploaded image with error handling"""
     try:
@@ -529,40 +420,161 @@ def process_video(video_path):
     except Exception as e:
         st.error(f"Error processing video: {str(e)}")
 
-# Network diagnostics function
-def show_network_diagnostics():
-    """Show network diagnostic information"""
-    st.subheader("🔍 Network Diagnostics")
+# Camera instruction function
+def show_camera_instructions():
+    """Show instructions for using local camera with OpenCV script"""
+    st.markdown("""
+    <div class="camera-box">
+        <h3>📹 Real-time Camera Detection</h3>
+        <p>Untuk deteksi real-time menggunakan webcam, jalankan script OpenCV terpisah:</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    opencv_script = '''
+# Simpan sebagai: realtime_pose_detection.py
+import cv2
+from ultralytics import YOLO
+import numpy as np
+
+def main():
+    print("🔄 Loading YOLO model...")
+    try:
+        model = YOLO("pose2/train2/weights/best.pt")
+        print("✅ Model loaded successfully!")
+    except Exception as e:
+        print(f"❌ Error loading model: {e}")
+        return
+    
+    print("🔄 Opening webcam...")
+    cap = cv2.VideoCapture(0)  # 0 untuk webcam default
+    
+    if not cap.isOpened():
+        print("❌ Error: Cannot access webcam")
+        print("💡 Try changing camera index (0, 1, 2...)")
+        return
+    
+    print("✅ Webcam opened successfully!")
+    print("📹 Controls:")
+    print("  - Press 'q' to quit")
+    print("  - Press 's' to save screenshot")
+    print("  - Press 'r' to reset counters")
+    
+    # Set camera properties
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+    
+    frame_count = 0
+    good_posture_count = 0
+    bad_posture_count = 0
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("❌ Error reading frame")
+            break
+        
+        try:
+            # YOLO prediction
+            results = model.predict(frame, conf=0.5, imgsz=640, verbose=False)
+            
+            # Draw results
+            annotated_frame = results[0].plot()
+            
+            # Count detections
+            if results[0].boxes is not None:
+                for box in results[0].boxes:
+                    label = int(box.cls.cpu().item())
+                    if label == 1:  # Postur Baik
+                        good_posture_count += 1
+                    else:  # Postur Buruk
+                        bad_posture_count += 1
+            
+            # Add statistics overlay
+            stats_text = [
+                f"Frame: {frame_count}",
+                f"Good Posture: {good_posture_count}",
+                f"Bad Posture: {bad_posture_count}",
+                "Controls: Q=Quit, S=Save, R=Reset"
+            ]
+            
+            for i, text in enumerate(stats_text):
+                y_pos = 30 + (i * 30)
+                cv2.putText(annotated_frame, text, (10, y_pos), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            # Show frame
+            cv2.imshow('Pose Detection - Real-time', annotated_frame)
+            
+            frame_count += 1
+            
+        except Exception as e:
+            print(f"⚠️ Error processing frame {frame_count}: {e}")
+            cv2.imshow('Pose Detection - Real-time', frame)
+            
+        # Handle key presses
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            break
+        elif key == ord('s'):
+            filename = f'pose_screenshot_{frame_count}.jpg'
+            cv2.imwrite(filename, annotated_frame)
+            print(f"📸 Screenshot saved: {filename}")
+        elif key == ord('r'):
+            good_posture_count = 0
+            bad_posture_count = 0
+            frame_count = 0
+            print("🔄 Counters reset!")
+    
+    # Cleanup
+    cap.release()
+    cv2.destroyAllWindows()
+    
+    # Final statistics
+    total_postures = good_posture_count + bad_posture_count
+    if total_postures > 0:
+        accuracy = (good_posture_count / total_postures) * 100
+        print(f"\\n📊 Final Statistics:")
+        print(f"  Total Frames: {frame_count}")
+        print(f"  Good Posture: {good_posture_count}")
+        print(f"  Bad Posture: {bad_posture_count}")
+        print(f"  Accuracy: {accuracy:.1f}%")
+    
+    print("👋 Webcam closed. Goodbye!")
+
+if __name__ == "__main__":
+    main()
+    '''
+    
+    st.code(opencv_script, language='python')
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("**Browser Console Test:**")
-        st.code("""
-// Paste ini di Browser Console (F12):
-navigator.mediaDevices.getUserMedia({video: true})
-  .then(stream => {
-    console.log('✅ Camera access OK');
-    stream.getTracks().forEach(track => track.stop());
-  })
-  .catch(err => console.error('❌ Camera error:', err));
-        """, language='javascript')
+        st.markdown("**📋 Cara Menggunakan:**")
+        st.markdown("""
+        1. Copy script di atas ke file `realtime_pose_detection.py`
+        2. Jalankan dengan: `python realtime_pose_detection.py`
+        3. Tekan 'q' untuk keluar
+        4. Tekan 's' untuk save screenshot
+        5. Tekan 'r' untuk reset counter
+        """)
     
     with col2:
-        st.markdown("**Quick Network Fixes:**")
+        st.markdown("**⚡ Keuntungan:**")
         st.markdown("""
-        1. **Test Hotspot**: Connect laptop ke hotspot HP
-        2. **Disable VPN**: Matikan VPN sementara
-        3. **Chrome Incognito**: Coba mode incognito
-        4. **Firewall**: Add Python/Streamlit ke whitelist
-        5. **DNS**: Ganti ke 8.8.8.8 dan 8.8.4.4
+        - ✅ Tidak perlu WebRTC (lebih stabil)
+        - ✅ Akses langsung ke webcam
+        - ✅ Performance lebih baik
+        - ✅ Real-time statistics
+        - ✅ Screenshot & counter features
         """)
 
 # Main Interface
 st.markdown("---")
 
 # Create tabs for different input methods
-tab1, tab2, tab3, tab4 = st.tabs(["📷 Upload Gambar", "🎥 Webcam Real-time", "🎬 Upload Video", "🔧 Troubleshooting"])
+tab1, tab2, tab3 = st.tabs(["📷 Upload Gambar", "🎥 Camera Real-time", "🎬 Upload Video"])
 
 # Tab 1: Image Upload
 with tab1:
@@ -626,138 +638,83 @@ with tab1:
         except Exception as e:
             st.error(f"❌ Error processing image: {str(e)}")
 
-# Tab 2: Real-time Webcam with WebRTC
+# Tab 2: Camera Real-time (OpenCV Instructions)
 with tab2:
-    st.subheader("Deteksi Pose Webcam Real-time")
+    st.subheader("Deteksi Pose Real-time dengan Webcam")
     
-    # Network configuration
-    selected_rtc_config = RTC_CONFIGURATIONS[rtc_config_option]
+    # Show camera instructions
+    show_camera_instructions()
     
-    # Get server count safely
-    try:
-        server_count = len(RTC_CONFIGURATIONS[rtc_config_option].configuration['iceServers'])
-    except:
-        server_count = "Unknown"
+    # Alternative options
+    st.markdown("---")
+    st.subheader("🔄 Alternative Options")
     
-    # Instructions with enhanced troubleshooting
-    st.markdown(f"""
-    <div class="info-box">
-        <strong>Petunjuk Webcam WebRTC:</strong><br>
-        1. Pastikan menggunakan Chrome/Firefox terbaru<br>
-        2. Klik "START" untuk memulai streaming webcam<br>
-        3. Izinkan akses kamera ketika diminta oleh browser<br>
-        4. Posisikan diri Anda di depan kamera<br>
-        5. AI akan menganalisis postur Anda secara real-time<br><br>
-        <strong>Current Config:</strong> {rtc_config_option}<br>
-        <strong>STUN Servers:</strong> {server_count} servers
-    </div>
-    """, unsafe_allow_html=True)
+    option_col1, option_col2 = st.columns(2)
     
-    # Connection troubleshooting
-    with st.expander("🚨 Jika 'Connection taking longer than expected'"):
+    with option_col1:
         st.markdown("""
-        **Quick Fixes:**
-        1. **Hotspot Test**: Connect laptop ke hotspot HP
-        2. **Browser**: Coba Chrome Incognito mode
-        3. **VPN**: Matikan VPN jika aktif
-        4. **Firewall**: Add Streamlit ke Windows Firewall whitelist
-        5. **Config**: Coba ubah "Network Configuration" di sidebar
-        
-        **Advanced Fixes:**
-        - Ganti DNS ke 8.8.8.8 dan 8.8.4.4
-        - Disable antivirus real-time protection sementara
-        - Test dengan: `telnet stun.l.google.com 19302`
-        """)
-    
-    # Error tracking
-    if 'webrtc_errors' not in st.session_state:
-        st.session_state.webrtc_errors = []
-    
-    try:
-        # WebRTC Streamer with enhanced configuration
-        webrtc_ctx = webrtc_streamer(
-            key=f"pose-detection-{rtc_config_option}",
-            video_transformer_factory=PoseDetectionTransformer,
-            rtc_configuration=selected_rtc_config,
-            media_stream_constraints={
-                "video": {
-                    "width": {"min": 320, "ideal": 640, "max": 1280},
-                    "height": {"min": 240, "ideal": 480, "max": 720},
-                    "frameRate": {"min": 10, "ideal": max_fps, "max": 60}
-                },
-                "audio": False
-            },
-            async_processing=async_processing,
-            video_html_attrs={
-                "style": {"width": "100%", "margin": "0 auto", "border": "2px solid #4ECDC4"},
-                "controls": False,
-                "autoPlay": True,
-                "muted": True,
-            },
-        )
-        
-        # Connection status
-        status_placeholder = st.empty()
-        
-        if webrtc_ctx.state.playing:
-            status_placeholder.success("✅ Camera connected successfully!")
-        elif webrtc_ctx.state.signalling:
-            status_placeholder.info("🔄 Connecting to camera... Please wait.")
-        else:
-            status_placeholder.warning("⚠️ Click START to begin camera connection")
-        
-        # Real-time statistics
-        if webrtc_ctx.video_transformer:
-            st.markdown("### 📊 Real-time Statistics")
-            
-            col1, col2, col3, col4, col5 = st.columns(5)
-            
-            with col1:
-                st.metric("Frames", webrtc_ctx.video_transformer.frame_count)
-            with col2:
-                st.metric("Current Detections", webrtc_ctx.video_transformer.detection_count)
-            with col3:
-                st.metric("Good Posture", webrtc_ctx.video_transformer.good_posture_count)
-            with col4:
-                st.metric("Bad Posture", webrtc_ctx.video_transformer.bad_posture_count)
-            with col5:
-                st.metric("FPS", f"{webrtc_ctx.video_transformer.fps:.1f}")
-            
-            # Session statistics
-            total_postures = webrtc_ctx.video_transformer.good_posture_count + webrtc_ctx.video_transformer.bad_posture_count
-            if total_postures > 0:
-                good_percentage = (webrtc_ctx.video_transformer.good_posture_count / total_postures) * 100
-                
-                st.markdown(f"""
-                <div class="success-box">
-                    <strong>Ringkasan Sesi:</strong><br>
-                    Tingkat Postur Baik: {good_percentage:.1f}%<br>
-                    Total Frame Diproses: {webrtc_ctx.video_transformer.frame_count}<br>
-                    Total Deteksi Postur: {total_postures}<br>
-                    Processing Errors: {webrtc_ctx.video_transformer.error_count}
-                </div>
-                """, unsafe_allow_html=True)
-    
-    except Exception as e:
-        st.error(f"❌ WebRTC Error: {str(e)}")
-        st.session_state.webrtc_errors.append(str(e))
-        
-        # Show error log
-        if len(st.session_state.webrtc_errors) > 0:
-            with st.expander("🐛 Error Log"):
-                for i, error in enumerate(st.session_state.webrtc_errors[-3:], 1):
-                    st.code(f"{i}. {error}")
-        
-        # Alternative solutions
-        st.markdown("""
-        <div class="warning-box">
-            <strong>WebRTC gagal. Coba alternative:</strong><br>
-            1. Refresh halaman dan coba lagi<br>
-            2. Gunakan tab "Upload Gambar" untuk test model<br>
-            3. Coba dengan smartphone (biasanya lebih stabil)<br>
-            4. Gunakan script OpenCV local (lihat tab Troubleshooting)
+        <div class="info-box">
+            <strong>🖥️ Local Development:</strong><br>
+            Gunakan script OpenCV di atas untuk:
+            <ul>
+                <li>Performance terbaik</li>
+                <li>Akses langsung webcam</li>
+                <li>Real-time processing</li>
+                <li>Tidak butuh internet</li>
+            </ul>
         </div>
         """, unsafe_allow_html=True)
+    
+    with option_col2:
+        st.markdown("""
+        <div class="warning-box">
+            <strong>🌐 Web Deployment:</strong><br>
+            Untuk web app dengan webcam:
+            <ul>
+                <li>Butuh WebRTC (kompleks)</li>
+                <li>Perlu HTTPS</li>
+                <li>Network dependent</li>
+                <li>Browser compatibility issues</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Troubleshooting section
+    with st.expander("🔧 Troubleshooting Camera Issues"):
+        st.markdown("""
+        **Jika script OpenCV tidak bisa akses kamera:**
+        
+        1. **Ganti Camera Index:**
+           ```python
+           cap = cv2.VideoCapture(1)  # Coba 1, 2, 3...
+           ```
+        
+        2. **Check Camera dengan Command:**
+           ```bash
+           # Windows
+           devmgmt.msc  # Device Manager > Cameras
+           
+           # Linux
+           ls /dev/video*
+           
+           # MacOS
+           system_profiler SPCameraDataType
+           ```
+        
+        3. **Permission Issues:**
+           - Windows: Check Privacy Settings > Camera
+           - macOS: System Preferences > Security & Privacy > Camera
+           - Linux: Check user groups (video, camera)
+        
+        4. **Alternative Camera Access:**
+           ```python
+           # DirectShow (Windows)
+           cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+           
+           # V4L2 (Linux)
+           cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+           ```
+        """)
 
 # Tab 3: Video Upload
 with tab3:
@@ -807,180 +764,7 @@ with tab3:
                 if 'temp_video_path' in locals() and os.path.exists(temp_video_path):
                     os.unlink(temp_video_path)
 
-# Tab 4: Troubleshooting
-with tab4:
-    st.subheader("🔧 Troubleshooting & Alternatives")
-    
-    # Network diagnostics
-    show_network_diagnostics()
-    
-    st.markdown("---")
-    
-    # Alternative solutions
-    st.subheader("🔄 Alternative Solutions")
-    
-    option_tabs = st.tabs(["Local OpenCV Script", "System Requirements", "Common Issues"])
-    
-    with option_tabs[0]:
-        st.markdown("**Jika WebRTC tidak bekerja, gunakan script OpenCV terpisah:**")
-        
-        opencv_script = '''
-# Simpan sebagai: local_pose_detection.py
-import cv2
-from ultralytics import YOLO
-import numpy as np
-
-def main():
-    print("🔄 Loading YOLO model...")
-    try:
-        model = YOLO("pose2/train2/weights/best.pt")
-        print("✅ Model loaded successfully!")
-    except Exception as e:
-        print(f"❌ Error loading model: {e}")
-        return
-    
-    print("🔄 Opening webcam...")
-    cap = cv2.VideoCapture(0)  # 0 untuk webcam default, coba 1, 2 jika tidak bekerja
-    
-    if not cap.isOpened():
-        print("❌ Error: Cannot access webcam")
-        print("💡 Try changing camera index (0, 1, 2...)")
-        return
-    
-    print("✅ Webcam opened successfully!")
-    print("📹 Press 'q' to quit, 's' to save screenshot")
-    
-    # Set camera properties
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    cap.set(cv2.CAP_PROP_FPS, 30)
-    
-    frame_count = 0
-    
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("❌ Error reading frame")
-            break
-        
-        try:
-            # YOLO prediction
-            results = model.predict(frame, conf=0.5, imgsz=640, verbose=False)
-            
-            # Draw results
-            annotated_frame = results[0].plot()
-            
-            # Add frame counter
-            cv2.putText(annotated_frame, f"Frame: {frame_count}", 
-                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            
-            # Show frame
-            cv2.imshow('Pose Detection - Press Q to quit, S to save', annotated_frame)
-            
-            frame_count += 1
-            
-        except Exception as e:
-            print(f"⚠️ Error processing frame {frame_count}: {e}")
-            cv2.imshow('Pose Detection - Press Q to quit', frame)
-            
-        # Handle key presses
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            break
-        elif key == ord('s'):
-            cv2.imwrite(f'pose_screenshot_{frame_count}.jpg', annotated_frame)
-            print(f"📸 Screenshot saved: pose_screenshot_{frame_count}.jpg")
-    
-    # Cleanup
-    cap.release()
-    cv2.destroyAllWindows()
-    print("👋 Webcam closed. Goodbye!")
-
-if __name__ == "__main__":
-    main()
-        '''
-        
-        st.code(opencv_script, language='python')
-        
-        st.markdown("**Cara menjalankan:**")
-        st.code("python local_pose_detection.py", language='bash')
-        
-        st.info("💡 Script ini akan berjalan tanpa WebRTC dan biasanya lebih stabil untuk laptop")
-    
-    with option_tabs[1]:
-        st.markdown("### 📋 System Requirements")
-        
-        requirements = {
-            "Python": "3.8+",
-            "Browser": "Chrome 88+ / Firefox 85+",
-            "Camera": "Working webcam device",
-            "Network": "Internet connection for STUN servers",
-            "OS": "Windows 10+ / macOS 10.14+ / Linux"
-        }
-        
-        dependencies = {
-            "streamlit": "Latest version",
-            "streamlit-webrtc": "Latest version", 
-            "ultralytics": "Latest version",
-            "opencv-python": "4.5+",
-            "numpy": "Latest version",
-            "Pillow": "Latest version"
-        }
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**System Requirements:**")
-            for req, ver in requirements.items():
-                st.write(f"✓ **{req}**: {ver}")
-        
-        with col2:
-            st.markdown("**Python Dependencies:**")
-            for dep, ver in dependencies.items():
-                st.write(f"✓ **{dep}**: {ver}")
-        
-        st.markdown("**Installation Commands:**")
-        st.code("""
-pip install streamlit streamlit-webrtc ultralytics opencv-python numpy Pillow
-# Atau
-pip install -r requirements.txt
-        """, language='bash')
-    
-    with option_tabs[2]:
-        st.markdown("### ❓ Common Issues & Solutions")
-        
-        issues = [
-            {
-                "issue": "Model tidak ditemukan (best.pt)",
-                "solution": "Pastikan file pose2/train2/weights/best.pt ada dan path benar"
-            },
-            {
-                "issue": "WebRTC connection timeout",
-                "solution": "Coba hotspot HP, disable VPN, atau ubah network config di sidebar"
-            },
-            {
-                "issue": "Kamera tidak terdeteksi",
-                "solution": "Check browser permission, coba browser lain, atau restart browser"
-            },
-            {
-                "issue": "Frame rate rendah",
-                "solution": "Turunkan image size, disable beberapa opsi tampilan, atau gunakan GPU"
-            },
-            {
-                "issue": "Error saat processing",
-                "solution": "Update dependencies, check Python version, atau restart aplikasi"
-            },
-            {
-                "issue": "HTTPS required error",
-                "solution": "Deploy ke cloud atau setup local HTTPS certificate"
-            }
-        ]
-        
-        for i, item in enumerate(issues, 1):
-            with st.expander(f"{i}. {item['issue']}"):
-                st.write(f"**Solution:** {item['solution']}")
-
-# Footer with tips
+# Footer with tips and information
 st.markdown("---")
 st.subheader("💡 Tips untuk Deteksi Pose yang Lebih Baik")
 
@@ -1012,24 +796,81 @@ with col3:
     - Turunkan confidence threshold untuk sensitivitas tinggi
     - Sesuaikan ukuran gambar (640 recommended)
     - Toggle opsi tampilan sesuai kebutuhan
-    - Gunakan enhanced network config
-    - Monitor FPS dan error count
+    - Monitor error count pada video processing
+    - Test dengan gambar dulu sebelum video
+    """)
+
+# System Requirements
+st.markdown("---")
+st.subheader("📋 System Requirements")
+
+req_col1, req_col2 = st.columns(2)
+
+with req_col1:
+    st.markdown("""
+    **Minimum Requirements:**
+    - Python 3.8+
+    - RAM: 4GB (8GB recommended)
+    - Storage: 2GB free space
+    - CPU: Intel i5 atau setara
+    - Webcam: Any USB/built-in camera
+    """)
+
+with req_col2:
+    st.markdown("""
+    **Dependencies:**
+    ```bash
+    pip install streamlit
+    pip install ultralytics
+    pip install opencv-python
+    pip install numpy
+    pip install Pillow
+    ```
     """)
 
 # Performance monitoring
 if st.sidebar.button("📊 Show Performance Info"):
     st.sidebar.markdown("### Performance Info")
-    st.sidebar.write(f"Python: {st.__version__}")
+    st.sidebar.write(f"Streamlit: {st.__version__}")
     st.sidebar.write(f"OpenCV: {cv2.__version__}")
     
-    # Memory usage (basic)
-    import psutil
-    process = psutil.Process()
-    memory_mb = process.memory_info().rss / 1024 / 1024
-    st.sidebar.write(f"Memory: {memory_mb:.1f} MB")
+    # Memory usage
+    try:
+        import psutil
+        process = psutil.Process()
+        memory_mb = process.memory_info().rss / 1024 / 1024
+        st.sidebar.write(f"Memory Usage: {memory_mb:.1f} MB")
+    except ImportError:
+        st.sidebar.write("Memory info: psutil not installed")
 
-# Version info
+# Version info and status
 st.sidebar.markdown("---")
-st.sidebar.markdown("**App Version:** 2.0 Enhanced")
+st.sidebar.markdown("**App Version:** 3.0 No-WebRTC")
 st.sidebar.markdown("**Last Updated:** July 2025")
-st.sidebar.markdown("**Status:** ✅ Ready")
+st.sidebar.markdown("**Status:** ✅ Stable (No WebRTC)")
+
+# Camera status indicator
+st.sidebar.markdown("### 📹 Camera Options")
+st.sidebar.info("🖥️ **Local Script**: Best performance")
+st.sidebar.warning("🌐 **Web Camera**: Use WebRTC version")
+st.sidebar.success("📷 **Upload**: Always available")
+
+# Quick start guide
+with st.sidebar.expander("🚀 Quick Start"):
+    st.markdown("""
+    **1. Upload Image**: Easiest way to test
+    **2. Local Camera**: Best for real-time
+    **3. Upload Video**: Batch processing
+    
+    **Model Path**: `pose2/train2/weights/best.pt`
+    """)
+
+# Footer note
+st.markdown("""
+---
+<div style="text-align: center; color: #666; padding: 20px;">
+    <strong>Pose Estimation App - No WebRTC Version</strong><br>
+    Untuk real-time webcam, gunakan script OpenCV local yang disediakan di tab Camera Real-time.<br>
+    Version ini lebih stabil dan tidak memerlukan konfigurasi network yang kompleks.
+</div>
+""", unsafe_allow_html=True)
