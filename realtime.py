@@ -250,15 +250,15 @@ def process_frame_detection(frame):
 
     return frame, detection_count, pose_results
 
-# WebRTC Video Transformer Class
-class PoseDetectionTransformer(VideoTransformerBase):
+# WebRTC Video Processor Class
+class PoseDetectionProcessor(VideoTransformerBase):
     def __init__(self):
         self.frame_count = 0
         self.detection_count = 0
         self.good_posture_count = 0
         self.bad_posture_count = 0
     
-    def transform(self, frame):
+    def recv(self, frame):
         img = frame.to_ndarray(format="bgr24")
         
         # Process frame with pose detection
@@ -275,7 +275,7 @@ class PoseDetectionTransformer(VideoTransformerBase):
             else:
                 self.bad_posture_count += 1
         
-        return processed_img
+        return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
 
 def process_image(image):
     if isinstance(image, Image.Image):
@@ -455,7 +455,7 @@ with tab2:
     # WebRTC Streamer
     webrtc_ctx = webrtc_streamer(
         key="pose-detection",
-        video_transformer_factory=PoseDetectionTransformer,
+        video_processor_factory=PoseDetectionProcessor,
         rtc_configuration=RTC_CONFIGURATION,
         media_stream_constraints={
             "video": {
@@ -469,28 +469,28 @@ with tab2:
     )
     
     # Real-time statistics
-    if webrtc_ctx.video_transformer:
+    if webrtc_ctx.video_processor:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Jumlah Frame", webrtc_ctx.video_transformer.frame_count)
+            st.metric("Jumlah Frame", webrtc_ctx.video_processor.frame_count)
         with col2:
-            st.metric("Deteksi Saat Ini", webrtc_ctx.video_transformer.detection_count)
+            st.metric("Deteksi Saat Ini", webrtc_ctx.video_processor.detection_count)
         with col3:
-            st.metric("Total Postur Baik", webrtc_ctx.video_transformer.good_posture_count)
+            st.metric("Total Postur Baik", webrtc_ctx.video_processor.good_posture_count)
         with col4:
-            st.metric("Total Postur Buruk", webrtc_ctx.video_transformer.bad_posture_count)
+            st.metric("Total Postur Buruk", webrtc_ctx.video_processor.bad_posture_count)
         
         # Session statistics
-        total_postures = webrtc_ctx.video_transformer.good_posture_count + webrtc_ctx.video_transformer.bad_posture_count
+        total_postures = webrtc_ctx.video_processor.good_posture_count + webrtc_ctx.video_processor.bad_posture_count
         if total_postures > 0:
-            good_percentage = (webrtc_ctx.video_transformer.good_posture_count / total_postures) * 100
+            good_percentage = (webrtc_ctx.video_processor.good_posture_count / total_postures) * 100
             
             st.markdown(f"""
             <div class="success-box">
                 <strong>Ringkasan Sesi:</strong><br>
                 Tingkat Postur Baik: {good_percentage:.1f}%<br>
-                Total Frame Diproses: {webrtc_ctx.video_transformer.frame_count}<br>
+                Total Frame Diproses: {webrtc_ctx.video_processor.frame_count}<br>
                 Total Deteksi Postur: {total_postures}
             </div>
             """, unsafe_allow_html=True)
