@@ -80,8 +80,8 @@ COLORS = {
 KEYPOINT_CONNECTIONS = [(0, 1), (1, 2)]
 
 # Header
-st.markdown('<h1 class="main-header">Deteksi dan Klasifikasi Pose</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Analisis postur tubuh dengan deteksi pose bertenaga AI menggunakan YOLO v8</p>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">Pose Estimation</h1>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Analisis postur tubuh dengan deteksi pose-estimation menggunakan YOLO v8</p>', unsafe_allow_html=True)
 
 # WebRTC Configuration
 RTC_CONFIGURATION = RTCConfiguration({
