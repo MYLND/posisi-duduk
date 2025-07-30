@@ -767,24 +767,128 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
     
-    # WebRTC Streamer with flexible constraints
+    # Add device selection state
+    if 'camera_selected' not in st.session_state:
+        st.session_state.camera_selected = False
+    
+    # Camera start/stop controls
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        if st.button("🎥 Start Camera", type="primary", use_container_width=True):
+            st.session_state.camera_selected = True
+            st.rerun()
+    with col2:
+        if st.button("⏹️ Stop", use_container_width=True):
+            st.session_state.camera_selected = False
+            st.rerun()
+    with col3:
+        if st.button("🔄 Reset", use_container_width=True):
+            st.session_state.camera_selected = False
+            st.cache_data.clear()
+            st.rerun()
+    
+    # WebRTC Streamer with stable key and better constraints
     try:
-        webrtc_ctx = webrtc_streamer(
-            key=f"pose-detection-{quality_preset}",
-            mode=WebRtcMode.SENDRECV,
-            video_transformer_factory=OptimizedPoseTransformer,
-            rtc_configuration=RTC_CONFIGURATION,
-            media_stream_constraints=camera_constraints,
-            async_processing=True,
-            video_html_attrs={
-                "style": {"width": "100%", "border-radius": "12px"},
-                "controls": False,
-                "autoPlay": True,
+        if st.session_state.camera_selected:
+            # Use a stable key that doesn't change
+            webrtc_key = "stable-pose-detection"
+            
+            # Simplified constraints to avoid OverconstrainedError
+            stable_constraints = {
+                "video": True,  # Let browser choose best settings
+                "audio": False
             }
-        )
-        
-        # Real-time statistics
-        if webrtc_ctx.video_transformer:
+            
+            # Alternative: More specific but flexible constraints
+            if quality_preset == "low":
+                stable_constraints = {
+                    "video": {
+                        "width": 320,
+                        "height": 240,
+                        "frameRate": 15
+                    },
+                    "audio": False
+                }
+            elif quality_preset == "high":
+                stable_constraints = {
+                    "video": {
+                        "width": 640,
+                        "height": 480,
+                        "frameRate": 30
+                    },
+                    "audio": False
+                }
+            else:  # balanced
+                stable_constraints = {
+                    "video": {
+                        "width": 480,
+                        "height": 360,
+                        "frameRate": 24
+                    },
+                    "audio": False
+                }
+            
+            # Add facing mode for mobile
+            if device_info["is_mobile"]:
+                if isinstance(stable_constraints["video"], dict):
+                    stable_constraints["video"]["facingMode"] = "user"
+            
+            webrtc_ctx = webrtc_streamer(
+                key=webrtc_key,
+                mode=WebRtcMode.SENDRECV,
+                video_transformer_factory=OptimizedPoseTransformer,
+                rtc_configuration=RTC_CONFIGURATION,
+                media_stream_constraints=stable_constraints,
+                async_processing=True,
+                video_html_attrs={
+                    "style": {
+                        "width": "100%", 
+                        "height": "auto",
+                        "border-radius": "12px",
+                        "box-shadow": "0 4px 12px rgba(0,0,0,0.1)"
+                    },
+                    "controls": False,
+                    "autoPlay": True,
+                    "muted": True,
+                },
+                sendback_audio=False,
+                sendback_video=False
+            )
+            
+            # Add connection status indicator
+            if webrtc_ctx.state.playing:
+                st.markdown("""
+                <div style="text-align: center; margin: 10px 0;">
+                    <span class="status-indicator status-online"></span>
+                    <strong>🟢 Camera Active - AI Processing Live</strong>
+                </div>
+                """, unsafe_allow_html=True)
+            elif webrtc_ctx.state.signalling:
+                st.markdown("""
+                <div style="text-align: center; margin: 10px 0;">
+                    <span class="status-indicator status-loading"></span>
+                    <strong>🟡 Connecting to Camera...</strong>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div style="text-align: center; margin: 10px 0;">
+                    <span class="status-indicator status-offline"></span>
+                    <strong>🔴 Camera Disconnected</strong>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            # Show placeholder when camera is not started
+            st.markdown("""
+            <div class="info-box" style="text-align: center; padding: 3rem;">
+                <h3>📹 Camera Ready</h3>
+                <p>Click <strong>"Start Camera"</strong> to begin real-time pose detection</p>
+                <p>Make sure to allow camera permissions when prompted</p>
+            </div>
+            """, unsafe_allow_html=True)
+            webrtc_ctx = None
+        # Real-time statistics - only show when camera is active
+        if webrtc_ctx and webrtc_ctx.video_transformer and webrtc_ctx.state.playing:
             st.markdown("### 📊 Live Statistics")
             
             # Get current stats
@@ -934,6 +1038,18 @@ with tab1:
                     with perf_col2:
                         st.metric("Processing Quality", quality_options[quality_preset])
                         st.metric("Model Device", st.session_state.device_info['device'].upper())
+        
+        elif st.session_state.camera_selected:
+            # Show loading state
+            st.markdown("""
+            <div class="warning-box" style="text-align: center;">
+                <h4>🔄 Initializing Camera...</h4>
+                <p>If camera doesn't appear:</p>
+                <p>1. Allow camera permissions</p>
+                <p>2. Check if other apps are using camera</p>
+                <p>3. Try refreshing the page</p>
+            </div>
+            """, unsafe_allow_html=True)
     
     except Exception as e:
         st.markdown(f"""
