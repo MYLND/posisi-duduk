@@ -80,8 +80,8 @@ COLORS = {
 KEYPOINT_CONNECTIONS = [(0, 1), (1, 2)]
 
 # Header
-st.markdown('<h1 class="main-header">Pose Estimation</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Analisis postur tubuh dengan deteksi pose-estimation menggunakan YOLO v8</p>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">Deteksi dan Klasifikasi Pose</h1>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Analisis postur tubuh dengan deteksi pose bertenaga AI menggunakan YOLO v8</p>', unsafe_allow_html=True)
 
 # WebRTC Configuration
 RTC_CONFIGURATION = RTCConfiguration({
@@ -560,3 +560,19 @@ with col3:
     - Toggle opsi tampilan sesuai kebutuhan
     - Periksa pengaturan lanjutan
     """)
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style='text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 10px; margin-top: 2rem;'>
+    <h4 style='color: #2c3e50; margin-bottom: 1rem;'>Sistem Deteksi Pose Bertenaga AI</h4>
+    <div style='display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;'>
+        <div><strong>Teknologi:</strong> YOLO v8 + OpenCV + Streamlit + WebRTC</div>
+        <div><strong>Model:</strong> Klasifikasi pose hasil pelatihan khusus</div>
+        <div><strong>Fitur:</strong> Dukungan webcam real-time</div>
+    </div>
+    <p style='margin-top: 1rem; color: #7f8c8d; font-style: italic;'>
+        Analisis postur manusia dengan teknologi AI terdepan
+    </p>
+</div>
+""", unsafe_allow_html=True)
