@@ -419,10 +419,34 @@ def process_video(video_path):
     except Exception as e:
         st.error(f"Error processing video: {str(e)}")
 
+def check_camera_availability():
+    """Check if camera is available"""
+    cap = None
+    try:
+        cap = cv2.VideoCapture(0)
+        if cap.isOpened():
+            ret, frame = cap.read()
+            if ret:
+                return True, "Camera available"
+            else:
+                return False, "Camera opened but cannot read frames"
+        else:
+            return False, "Cannot open camera"
+    except Exception as e:
+        return False, f"Camera check error: {str(e)}"
+    finally:
+        if cap is not None:
+            cap.release()
+
 def capture_single_frame():
     """Capture and process a single frame from webcam"""
     cap = None
     try:
+        # First check if camera is available
+        camera_available, camera_status = check_camera_availability()
+        if not camera_available:
+            return None, f"❌ Kamera tidak tersedia: {camera_status}"
+        
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
             return None, "❌ Tidak dapat mengakses kamera. Pastikan kamera tidak digunakan aplikasi lain."
@@ -520,78 +544,141 @@ with tab1:
 with tab2:
     st.subheader("Deteksi Pose Webcam Snapshot")
     
-    # Instructions
-    st.markdown("""
-    <div class="info-box">
-        <strong>📋 Petunjuk Webcam:</strong><br>
-        1. Klik "Ambil Foto" untuk mengakses kamera<br>
-        2. Posisikan diri Anda dengan baik<br>
-        3. AI akan menganalisis postur dari foto yang diambil<br>
-        4. Hasil akan ditampilkan setelah pemrosesan
-    </div>
-    """, unsafe_allow_html=True)
+    # Check camera availability first
+    camera_available, camera_status = check_camera_availability()
     
-    col1, col2, col3 = st.columns([1, 2, 1])
-    
-    with col2:
-        if st.button("📸 Ambil Foto dari Kamera", type="primary", use_container_width=True):
-            with st.spinner("📹 Mengakses kamera dan mengambil foto..."):
-                result, error = capture_single_frame()
+    if not camera_available:
+        st.error(f"🚫 Kamera Tidak Tersedia: {camera_status}")
+        st.markdown("""
+        <div class="warning-box">
+            <strong>⚠️ Kamera tidak dapat diakses</strong><br><br>
+            <strong>Kemungkinan penyebab:</strong><br>
+            • Aplikasi berjalan di environment cloud (Streamlit Cloud) yang tidak memiliki akses kamera<br>
+            • Kamera sedang digunakan aplikasi lain<br>
+            • Driver kamera belum terinstall<br>
+            • Izin kamera ditolak<br><br>
+            <strong>💡 Solusi:</strong><br>
+            • Jalankan aplikasi di komputer lokal untuk mengakses kamera<br>
+            • Gunakan fitur "Upload Gambar" sebagai alternatif<br>
+            • Atau upload video untuk analisis batch
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Show demo functionality
+        st.markdown("---")
+        st.subheader("🎯 Demo Mode - Upload Gambar Sebagai Alternatif")
+        
+        demo_image = st.file_uploader(
+            "Upload gambar untuk simulasi deteksi webcam",
+            type=['jpg', 'jpeg', 'png', 'bmp'],
+            key="demo_webcam"
+        )
+        
+        if demo_image is not None:
+            image = Image.open(demo_image)
             
-            if error:
-                st.error(error)
-                st.markdown("""
-                <div class="warning-box">
-                    <strong>💡 Tips Mengatasi Masalah Kamera:</strong><br>
-                    • Pastikan tidak ada aplikasi lain yang menggunakan kamera<br>
-                    • Refresh halaman dan coba lagi<br>
-                    • Periksa izin kamera di browser<br>
-                    • Coba restart browser jika masalah berlanjut
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.success("✅ Foto berhasil diambil dan diproses!")
-                
-                # Display results
-                col_img1, col_img2 = st.columns(2)
-                
-                with col_img1:
-                    st.markdown("**📸 Hasil Capture & Analisis**")
-                    st.image(result['frame'], use_container_width=True)
-                
-                with col_img2:
-                    st.markdown("**📊 Statistik Deteksi**")
+            col_demo1, col_demo2 = st.columns(2)
+            
+            with col_demo1:
+                st.markdown("**📸 Gambar Input (Simulasi Webcam)**")
+                st.image(image, use_container_width=True)
+            
+            with col_demo2:
+                if st.button("🔍 Analisis Demo", type="primary", key="demo_analyze"):
+                    with st.spinner("Menganalisis pose..."):
+                        processed_image, detection_count, pose_results = process_image(image)
                     
-                    # Show detection metrics
-                    st.markdown(f"""
-                    <div class="metric-container">
-                        <h4>🎯 Deteksi: {result['detection_count']}</h4>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown("**📊 Hasil Analisis**")
+                    st.image(processed_image, use_container_width=True)
                     
-                    if result['detection_count'] > 0:
-                        # Count posture types
-                        good_count = sum(1 for r in result['pose_results'] if r['label'] == 'Postur Baik')
-                        bad_count = sum(1 for r in result['pose_results'] if r['label'] == 'Postur Buruk')
+                    if detection_count > 0:
+                        good_count = sum(1 for r in pose_results if r['label'] == 'Postur Baik')
+                        bad_count = sum(1 for r in pose_results if r['label'] == 'Postur Buruk')
                         
                         st.markdown(f"""
                         <div class="success-box">
-                            <strong>📈 Hasil Analisis:</strong><br>
+                            <strong>📈 Hasil Demo:</strong><br>
+                            🎯 Total Deteksi: {detection_count}<br>
                             ✅ Postur Baik: {good_count}<br>
-                            ❌ Postur Buruk: {bad_count}<br>
+                            ❌ Postur Buruk: {bad_count}
+                        </div>
+                        """, unsafe_allow_html=True)
+    else:
+        # Original webcam functionality
+        st.success(f"✅ {camera_status}")
+        
+        # Instructions
+        st.markdown("""
+        <div class="info-box">
+            <strong>📋 Petunjuk Webcam:</strong><br>
+            1. Klik "Ambil Foto" untuk mengakses kamera<br>
+            2. Posisikan diri Anda dengan baik<br>
+            3. AI akan menganalisis postur dari foto yang diambil<br>
+            4. Hasil akan ditampilkan setelah pemrosesan
+        </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        
+        with col2:
+            if st.button("📸 Ambil Foto dari Kamera", type="primary", use_container_width=True):
+                with st.spinner("📹 Mengakses kamera dan mengambil foto..."):
+                    result, error = capture_single_frame()
+                
+                if error:
+                    st.error(error)
+                    st.markdown("""
+                    <div class="warning-box">
+                        <strong>💡 Tips Mengatasi Masalah Kamera:</strong><br>
+                        • Pastikan tidak ada aplikasi lain yang menggunakan kamera<br>
+                        • Refresh halaman dan coba lagi<br>
+                        • Periksa izin kamera di browser<br>
+                        • Coba restart browser jika masalah berlanjut
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.success("✅ Foto berhasil diambil dan diproses!")
+                    
+                    # Display results
+                    col_img1, col_img2 = st.columns(2)
+                    
+                    with col_img1:
+                        st.markdown("**📸 Hasil Capture & Analisis**")
+                        st.image(result['frame'], use_container_width=True)
+                    
+                    with col_img2:
+                        st.markdown("**📊 Statistik Deteksi**")
+                        
+                        # Show detection metrics
+                        st.markdown(f"""
+                        <div class="metric-container">
+                            <h4>🎯 Deteksi: {result['detection_count']}</h4>
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        # Detailed results
-                        with st.expander("📋 Detail Lengkap"):
-                            for i, pose_result in enumerate(result['pose_results'], 1):
-                                st.write(f"**Deteksi {i}:**")
-                                st.write(f"- Klasifikasi: {pose_result['label']}")
-                                st.write(f"- Confidence: {pose_result['confidence']:.2%}")
-                                st.write("---")
-                    else:
-                        st.warning("⚠️ Tidak ada pose yang terdeteksi dalam foto.")
-                        st.info("💡 Coba sesuaikan posisi atau confidence threshold di sidebar.")
+                        if result['detection_count'] > 0:
+                            # Count posture types
+                            good_count = sum(1 for r in result['pose_results'] if r['label'] == 'Postur Baik')
+                            bad_count = sum(1 for r in result['pose_results'] if r['label'] == 'Postur Buruk')
+                            
+                            st.markdown(f"""
+                            <div class="success-box">
+                                <strong>📈 Hasil Analisis:</strong><br>
+                                ✅ Postur Baik: {good_count}<br>
+                                ❌ Postur Buruk: {bad_count}<br>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Detailed results
+                            with st.expander("📋 Detail Lengkap"):
+                                for i, pose_result in enumerate(result['pose_results'], 1):
+                                    st.write(f"**Deteksi {i}:**")
+                                    st.write(f"- Klasifikasi: {pose_result['label']}")
+                                    st.write(f"- Confidence: {pose_result['confidence']:.2%}")
+                                    st.write("---")
+                        else:
+                            st.warning("⚠️ Tidak ada pose yang terdeteksi dalam foto.")
+                            st.info("💡 Coba sesuaikan posisi atau confidence threshold di sidebar.")
 
 # Tab 3: Video Upload
 with tab3:
