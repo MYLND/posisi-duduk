@@ -633,6 +633,12 @@ with tab2:
     # Network configuration
     selected_rtc_config = RTC_CONFIGURATIONS[rtc_config_option]
     
+    # Get server count safely
+    try:
+        server_count = len(RTC_CONFIGURATIONS[rtc_config_option].configuration['iceServers'])
+    except:
+        server_count = "Unknown"
+    
     # Instructions with enhanced troubleshooting
     st.markdown(f"""
     <div class="info-box">
@@ -643,7 +649,7 @@ with tab2:
         4. Posisikan diri Anda di depan kamera<br>
         5. AI akan menganalisis postur Anda secara real-time<br><br>
         <strong>Current Config:</strong> {rtc_config_option}<br>
-        <strong>STUN Servers:</strong> {len(selected_rtc_config.configuration['iceServers'])} servers
+        <strong>STUN Servers:</strong> {server_count} servers
     </div>
     """, unsafe_allow_html=True)
     
