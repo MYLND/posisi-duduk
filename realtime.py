@@ -561,18 +561,4 @@ with col3:
     - Periksa pengaturan lanjutan
     """)
 
-# Footer
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 10px; margin-top: 2rem;'>
-    <h4 style='color: #2c3e50; margin-bottom: 1rem;'>Deteksi posisi duduk</h4>
-    <div style='display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;'>
-        <div><strong>Teknologi:</strong> YOLO v8 + OpenCV + Streamlit + WebRTC</div>
-        <div><strong>Model:</strong> Klasifikasi pose hasil pelatihan khusus</div>
-        <div><strong>Fitur:</strong> Dukungan webcam real-time</div>
-    </div>
-    <p style='margin-top: 1rem; color: #7f8c8d; font-style: italic;'>
-        
-    </p>
-</div>
-""", unsafe_allow_html=True)
+
