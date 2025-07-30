@@ -572,7 +572,7 @@ st.markdown("""
         <div><strong>Fitur:</strong> Dukungan webcam real-time</div>
     </div>
     <p style='margin-top: 1rem; color: #7f8c8d; font-style: italic;'>
-        Analisis postur manusia dengan teknologi AI terdepan
+        
     </p>
 </div>
 """, unsafe_allow_html=True)
