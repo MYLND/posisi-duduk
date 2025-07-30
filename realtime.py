@@ -97,19 +97,19 @@ with st.sidebar:
     
     # Model settings
     st.subheader("Pengaturan Deteksi")
-    confidence_threshold = st.slider("Ambang Batas Kepercayaan", 0.1, 1.0, 0.5, 0.05)
+    confidence_threshold = st.slider("Confidence Threshold", 0.1, 1.0, 0.5, 0.05)
     image_size = st.selectbox("Ukuran Gambar", [320, 640, 1280], index=1)
     
     # Display settings
     st.subheader("Opsi Tampilan")
-    show_keypoints = st.checkbox("Tampilkan Titik Kunci", value=True)
+    show_keypoints = st.checkbox("Tampilkan Keypoints", value=True)
     show_connections = st.checkbox("Tampilkan Koneksi", value=True)
     show_angles = st.checkbox("Tampilkan Sudut", value=True)
-    show_confidence = st.checkbox("Tampilkan Kepercayaan", value=True)
+    show_confidence = st.checkbox("Tampilkan Confidence", value=True)
     
     # Advanced settings
     with st.expander("Pengaturan Lanjutan"):
-        keypoint_threshold = st.slider("Kepercayaan Titik Kunci", 0.1, 1.0, 0.5, 0.05)
+        keypoint_threshold = st.slider("Keypoint Threshold", 0.1, 1.0, 0.5, 0.05)
         line_thickness = st.slider("Ketebalan Garis", 1, 5, 2)
         text_scale = st.slider("Skala Teks", 0.3, 1.0, 0.6, 0.1)
 
@@ -376,16 +376,16 @@ def process_video(video_path):
 st.markdown("---")
 
 # Create tabs for different input methods
-tab1, tab2, tab3 = st.tabs(["Unggah Gambar", "Webcam Real-time", "Unggah Video"])
+tab1, tab2, tab3 = st.tabs(["Upload Gambar", "Webcam Real-time", "Upload Video"])
 
 # Tab 1: Image Upload
 with tab1:
-    st.subheader("Unggah Gambar untuk Deteksi Pose")
+    st.subheader("Upload Gambar untuk Deteksi Pose")
     
     uploaded_image = st.file_uploader(
         "Pilih file gambar",
         type=['jpg', 'jpeg', 'png', 'bmp', 'tiff'],
-        help="Unggah gambar yang berisi orang untuk deteksi dan klasifikasi pose"
+        help="Upload gambar yang berisi orang untuk deteksi dan klasifikasi pose"
     )
     
     if uploaded_image is not None:
@@ -427,14 +427,14 @@ with tab1:
                     """, unsafe_allow_html=True)
                     
                     # Detailed results
-                    with st.expander("Hasil Detail"):
+                    with st.expander("Detail Hasil"):
                         for i, result in enumerate(pose_results, 1):
                             st.write(f"**Orang {i}:**")
                             st.write(f"- Klasifikasi: {result['label']}")
-                            st.write(f"- Kepercayaan: {result['confidence']:.2%}")
+                            st.write(f"- Confidence: {result['confidence']:.2%}")
                             st.write("---")
                 else:
-                    st.warning("Tidak ada pose yang terdeteksi dalam gambar. Coba sesuaikan ambang batas kepercayaan.")
+                    st.warning("Tidak ada pose yang terdeteksi dalam gambar. Coba sesuaikan confidence threshold.")
 
 # Tab 2: Real-time Webcam with WebRTC
 with tab2:
@@ -497,12 +497,12 @@ with tab2:
 
 # Tab 3: Video Upload
 with tab3:
-    st.subheader("Unggah Video untuk Deteksi Pose")
+    st.subheader("Upload Video untuk Deteksi Pose")
     
     uploaded_video = st.file_uploader(
         "Pilih file video",
         type=['mp4', 'avi', 'mov', 'mkv', 'wmv'],
-        help="Unggah file video untuk analisis deteksi pose secara batch"
+        help="Upload file video untuk analisis deteksi pose secara batch"
     )
     
     if uploaded_video is not None:
@@ -540,7 +540,7 @@ with col1:
     - Pastikan pencahayaan yang baik
     - Posisikan kamera setinggi mata
     - Jaga jarak 1-2 meter
-    - Hindari latar belakang yang sibuk
+    - Hindari latar belakang yang rumit
     """)
 
 with col2:
@@ -555,8 +555,8 @@ with col2:
 with col3:
     st.markdown("""
     **Pengaturan**
-    - Turunkan kepercayaan untuk sensitivitas
-    - Sesuaikan ukuran gambar untuk performa
+    - Turunkan confidence threshold untuk sensitivitas tinggi
+    - Sesuaikan ukuran gambar untuk performa optimal
     - Toggle opsi tampilan sesuai kebutuhan
     - Periksa pengaturan lanjutan
     """)
@@ -572,7 +572,7 @@ st.markdown("""
         <div><strong>Fitur:</strong> Dukungan webcam real-time</div>
     </div>
     <p style='margin-top: 1rem; color: #7f8c8d; font-style: italic;'>
-        Analisis postur manusia dengan teknologi AI mutakhir
+        Analisis postur manusia dengan teknologi AI terdepan
     </p>
 </div>
 """, unsafe_allow_html=True)
