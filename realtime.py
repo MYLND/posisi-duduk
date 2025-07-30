@@ -7,18 +7,11 @@ import numpy as np
 import math
 from PIL import Image
 import time
-import threading
-import queue
-import asyncio
 import logging
 
 # Suppress warnings and set proper logging
 logging.getLogger('ultralytics').setLevel(logging.ERROR)
 logging.getLogger('streamlit').setLevel(logging.ERROR)
-
-# Set asyncio policy for compatibility
-if os.name == 'nt':  # Windows
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # Page configuration
 st.set_page_config(
@@ -72,6 +65,13 @@ st.markdown("""
         border-radius: 10px;
         padding: 10px;
         margin: 10px 0;
+        text-align: center;
+    }
+    .metric-container {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 0.5rem 0;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -92,22 +92,6 @@ KEYPOINT_CONNECTIONS = [(0, 1), (1, 2)]
 # Header
 st.markdown('<h1 class="main-header">Pose Estimation</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Analisis postur tubuh dengan deteksi pose-estimation menggunakan YOLO v8</p>', unsafe_allow_html=True)
-
-# Initialize session state
-if 'camera_stats' not in st.session_state:
-    st.session_state.camera_stats = {
-        'frame_count': 0,
-        'detection_count': 0,
-        'good_posture_count': 0,
-        'bad_posture_count': 0,
-        'is_running': False
-    }
-
-if 'camera_thread' not in st.session_state:
-    st.session_state.camera_thread = None
-
-if 'frame_queue' not in st.session_state:
-    st.session_state.frame_queue = queue.Queue(maxsize=2)
 
 # Sidebar Configuration
 with st.sidebar:
@@ -130,7 +114,6 @@ with st.sidebar:
         keypoint_threshold = st.slider("Keypoint Threshold", 0.1, 1.0, 0.5, 0.05)
         line_thickness = st.slider("Ketebalan Garis", 1, 5, 2)
         text_scale = st.slider("Skala Teks", 0.3, 1.0, 0.6, 0.1)
-        camera_fps = st.slider("Camera FPS", 5, 30, 10)
 
 # Model loading function
 @st.cache_resource
@@ -330,68 +313,6 @@ def process_frame_detection(frame):
         print(f"Error in process_frame_detection: {e}")
         return frame, 0, []
 
-def camera_capture_thread():
-    """Camera capture thread function"""
-    cap = None
-    try:
-        cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            st.error("❌ Tidak dapat mengakses kamera")
-            return
-        
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        cap.set(cv2.CAP_PROP_FPS, camera_fps)
-        
-        frame_time = 1.0 / camera_fps
-        
-        while st.session_state.camera_stats['is_running']:
-            start_time = time.time()
-            
-            ret, frame = cap.read()
-            if not ret:
-                break
-            
-            # Process frame
-            processed_frame, detection_count, pose_results = process_frame_detection(frame)
-            
-            # Update statistics
-            st.session_state.camera_stats['frame_count'] += 1
-            st.session_state.camera_stats['detection_count'] = detection_count
-            
-            # Count posture types
-            for result in pose_results:
-                if result['label'] == 'Postur Baik':
-                    st.session_state.camera_stats['good_posture_count'] += 1
-                else:
-                    st.session_state.camera_stats['bad_posture_count'] += 1
-            
-            # Add frame to queue (non-blocking)
-            try:
-                # Clear old frames
-                while not st.session_state.frame_queue.empty():
-                    try:
-                        st.session_state.frame_queue.get_nowait()
-                    except queue.Empty:
-                        break
-                
-                st.session_state.frame_queue.put_nowait(processed_frame)
-            except queue.Full:
-                pass
-            
-            # Control frame rate
-            elapsed = time.time() - start_time
-            sleep_time = max(0, frame_time - elapsed)
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-    
-    except Exception as e:
-        print(f"Camera error: {e}")
-    finally:
-        if cap is not None:
-            cap.release()
-        st.session_state.camera_stats['is_running'] = False
-
 def process_image(image):
     """Process uploaded image for pose detection"""
     try:
@@ -498,11 +419,44 @@ def process_video(video_path):
     except Exception as e:
         st.error(f"Error processing video: {str(e)}")
 
+def capture_single_frame():
+    """Capture and process a single frame from webcam"""
+    cap = None
+    try:
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            return None, "❌ Tidak dapat mengakses kamera. Pastikan kamera tidak digunakan aplikasi lain."
+        
+        # Set camera properties
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        
+        # Capture frame
+        ret, frame = cap.read()
+        if not ret:
+            return None, "❌ Tidak dapat mengambil gambar dari kamera"
+        
+        # Process frame
+        processed_frame, detection_count, pose_results = process_frame_detection(frame)
+        processed_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+        
+        return {
+            'frame': processed_rgb,
+            'detection_count': detection_count,
+            'pose_results': pose_results
+        }, None
+        
+    except Exception as e:
+        return None, f"❌ Error mengakses kamera: {str(e)}"
+    finally:
+        if cap is not None:
+            cap.release()
+
 # Main Interface
 st.markdown("---")
 
 # Create tabs for different input methods
-tab1, tab2, tab3 = st.tabs(["📷 Upload Gambar", "📹 Webcam Real-time", "🎬 Upload Video"])
+tab1, tab2, tab3 = st.tabs(["📷 Upload Gambar", "📹 Webcam Snapshot", "🎬 Upload Video"])
 
 # Tab 1: Image Upload
 with tab1:
@@ -562,99 +516,82 @@ with tab1:
                 else:
                     st.warning("⚠️ Tidak ada pose yang terdeteksi. Coba sesuaikan confidence threshold.")
 
-# Tab 2: Real-time Webcam (Native OpenCV)
+# Tab 2: Webcam Snapshot (Simplified)
 with tab2:
-    st.subheader("Deteksi Pose Webcam Real-time")
+    st.subheader("Deteksi Pose Webcam Snapshot")
     
     # Instructions
     st.markdown("""
     <div class="info-box">
         <strong>📋 Petunjuk Webcam:</strong><br>
-        1. Klik "START" untuk memulai kamera<br>
-        2. Posisikan diri Anda di depan kamera<br>
-        3. AI akan menganalisis postur secara real-time<br>
-        4. Klik "STOP" untuk mengakhiri sesi
+        1. Klik "Ambil Foto" untuk mengakses kamera<br>
+        2. Posisikan diri Anda dengan baik<br>
+        3. AI akan menganalisis postur dari foto yang diambil<br>
+        4. Hasil akan ditampilkan setelah pemrosesan
     </div>
     """, unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("▶️ START Camera", type="primary"):
-            if not st.session_state.camera_stats['is_running']:
-                st.session_state.camera_stats = {
-                    'frame_count': 0,
-                    'detection_count': 0,
-                    'good_posture_count': 0,
-                    'bad_posture_count': 0,
-                    'is_running': True
-                }
-                st.session_state.camera_thread = threading.Thread(target=camera_capture_thread)
-                st.session_state.camera_thread.daemon = True
-                st.session_state.camera_thread.start()
-                st.success("✅ Kamera dimulai!")
-            else:
-                st.warning("⚠️ Kamera sudah berjalan!")
+    col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        if st.button("⏹️ STOP Camera"):
-            if st.session_state.camera_stats['is_running']:
-                st.session_state.camera_stats['is_running'] = False
-                st.success("✅ Kamera dihentikan!")
+        if st.button("📸 Ambil Foto dari Kamera", type="primary", use_container_width=True):
+            with st.spinner("📹 Mengakses kamera dan mengambil foto..."):
+                result, error = capture_single_frame()
+            
+            if error:
+                st.error(error)
+                st.markdown("""
+                <div class="warning-box">
+                    <strong>💡 Tips Mengatasi Masalah Kamera:</strong><br>
+                    • Pastikan tidak ada aplikasi lain yang menggunakan kamera<br>
+                    • Refresh halaman dan coba lagi<br>
+                    • Periksa izin kamera di browser<br>
+                    • Coba restart browser jika masalah berlanjut
+                </div>
+                """, unsafe_allow_html=True)
             else:
-                st.info("ℹ️ Kamera tidak sedang berjalan")
-    
-    with col3:
-        if st.button("🔄 Reset Stats"):
-            st.session_state.camera_stats.update({
-                'frame_count': 0,
-                'detection_count': 0,
-                'good_posture_count': 0,
-                'bad_posture_count': 0
-            })
-            st.success("✅ Statistik direset!")
-    
-    # Camera display
-    if st.session_state.camera_stats['is_running']:
-        camera_placeholder = st.empty()
-        
-        # Try to get frame from queue
-        try:
-            if not st.session_state.frame_queue.empty():
-                frame = st.session_state.frame_queue.get_nowait()
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                with camera_placeholder.container():
-                    st.markdown('<div class="camera-container">', unsafe_allow_html=True)
-                    st.image(frame_rgb, channels="RGB", use_container_width=True)
-                    st.markdown('</div>', unsafe_allow_html=True)
-        except queue.Empty:
-            pass
-    
-    # Statistics display
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("📊 Frame Count", st.session_state.camera_stats['frame_count'])
-    with col2:
-        st.metric("🎯 Current Detections", st.session_state.camera_stats['detection_count'])
-    with col3:
-        st.metric("✅ Good Posture", st.session_state.camera_stats['good_posture_count'])
-    with col4:
-        st.metric("❌ Bad Posture", st.session_state.camera_stats['bad_posture_count'])
-    
-    # Session summary
-    total_postures = st.session_state.camera_stats['good_posture_count'] + st.session_state.camera_stats['bad_posture_count']
-    if total_postures > 0:
-        good_percentage = (st.session_state.camera_stats['good_posture_count'] / total_postures) * 100
-        
-        st.markdown(f"""
-        <div class="success-box">
-            <strong>📈 Ringkasan Sesi:</strong><br>
-            Tingkat Postur Baik: {good_percentage:.1f}%<br>
-            Total Frame: {st.session_state.camera_stats['frame_count']}<br>
-            Total Deteksi: {total_postures}
-        </div>
-        """, unsafe_allow_html=True)
+                st.success("✅ Foto berhasil diambil dan diproses!")
+                
+                # Display results
+                col_img1, col_img2 = st.columns(2)
+                
+                with col_img1:
+                    st.markdown("**📸 Hasil Capture & Analisis**")
+                    st.image(result['frame'], use_container_width=True)
+                
+                with col_img2:
+                    st.markdown("**📊 Statistik Deteksi**")
+                    
+                    # Show detection metrics
+                    st.markdown(f"""
+                    <div class="metric-container">
+                        <h4>🎯 Deteksi: {result['detection_count']}</h4>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if result['detection_count'] > 0:
+                        # Count posture types
+                        good_count = sum(1 for r in result['pose_results'] if r['label'] == 'Postur Baik')
+                        bad_count = sum(1 for r in result['pose_results'] if r['label'] == 'Postur Buruk')
+                        
+                        st.markdown(f"""
+                        <div class="success-box">
+                            <strong>📈 Hasil Analisis:</strong><br>
+                            ✅ Postur Baik: {good_count}<br>
+                            ❌ Postur Buruk: {bad_count}<br>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Detailed results
+                        with st.expander("📋 Detail Lengkap"):
+                            for i, pose_result in enumerate(result['pose_results'], 1):
+                                st.write(f"**Deteksi {i}:**")
+                                st.write(f"- Klasifikasi: {pose_result['label']}")
+                                st.write(f"- Confidence: {pose_result['confidence']:.2%}")
+                                st.write("---")
+                    else:
+                        st.warning("⚠️ Tidak ada pose yang terdeteksi dalam foto.")
+                        st.info("💡 Coba sesuaikan posisi atau confidence threshold di sidebar.")
 
 # Tab 3: Video Upload
 with tab3:
@@ -711,7 +648,7 @@ with col2:
     - ✅ Duduk tegak untuk hasil terbaik
     - ✅ Pakai pakaian kontras
     - ✅ Hindari pakaian longgar
-    - ✅ Tetap dalam frame kamera
+    - ✅ Pastikan seluruh tubuh terlihat
     """)
 
 with col3:
@@ -723,11 +660,15 @@ with col3:
     - ✅ Cek pengaturan lanjutan
     """)
 
-# Auto-refresh for camera display
-if st.session_state.camera_stats['is_running']:
-    time.sleep(0.1)
-    st.rerun()
-
 # Footer
 st.markdown("---")
-st.markdown("**ℹ️ Catatan:** Aplikasi menggunakan YOLO v8 untuk deteksi pose. Performa tergantung kualitas input dan pengaturan yang dipilih.")
+st.markdown("""
+<div class="info-box">
+    <strong>ℹ️ Informasi Aplikasi:</strong><br>
+    • Menggunakan YOLO v8 untuk deteksi pose<br>
+    • Mendukung format gambar: JPG, PNG, BMP, TIFF<br>
+    • Mendukung format video: MP4, AVI, MOV, MKV, WMV<br>
+    • Webcam menggunakan snapshot mode untuk stabilitas<br>
+    • Performa tergantung kualitas input dan pengaturan
+</div>
+""", unsafe_allow_html=True)
