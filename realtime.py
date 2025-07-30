@@ -63,24 +63,6 @@ st.markdown("""
         border-left: 4px solid #ffc107;
         margin: 1rem 0;
     }
-    .connection-status {
-        padding: 0.5rem;
-        border-radius: 5px;
-        margin: 0.5rem 0;
-        font-weight: bold;
-    }
-    .status-connected {
-        background-color: #d4edda;
-        color: #155724;
-    }
-    .status-connecting {
-        background-color: #fff3cd;
-        color: #856404;
-    }
-    .status-failed {
-        background-color: #f8d7da;
-        color: #721c24;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -101,56 +83,13 @@ KEYPOINT_CONNECTIONS = [(0, 1), (1, 2)]
 st.markdown('<h1 class="main-header">Pose Estimation</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Analisis postur tubuh dengan deteksi pose-estimation menggunakan YOLO v8</p>', unsafe_allow_html=True)
 
-# Enhanced WebRTC Configuration with TURN servers
-def get_rtc_configuration():
-    """
-    Get RTC configuration with multiple STUN and TURN servers for better connectivity
-    """
-    return RTCConfiguration({
-        "iceServers": [
-            # Google STUN servers
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["stun:stun1.l.google.com:19302"]},
-            {"urls": ["stun:stun2.l.google.com:19302"]},
-            {"urls": ["stun:stun3.l.google.com:19302"]},
-            {"urls": ["stun:stun4.l.google.com:19302"]},
-            
-            # Alternative STUN servers
-            {"urls": ["stun:stun.stunprotocol.org:3478"]},
-            {"urls": ["stun:stun.softjoys.com:3478"]},
-            
-            # Free TURN servers (replace with your own for production)
-            {
-                "urls": ["turn:relay1.expressturn.com:3478"],
-                "username": "efJBIBF0YZIP4A39LA",
-                "credential": "wcHYrCW0K1CajTrn"
-            },
-            {
-                "urls": ["turn:a.relay.metered.ca:80"],
-                "username": "89dd60e6a8ea8c33c41710a3",
-                "credential": "MVHlqr+6T0fkOaOq"
-            },
-            {
-                "urls": ["turn:a.relay.metered.ca:80?transport=tcp"],
-                "username": "89dd60e6a8ea8c33c41710a3",
-                "credential": "MVHlqr+6T0fkOaOq"
-            },
-            {
-                "urls": ["turn:a.relay.metered.ca:443"],
-                "username": "89dd60e6a8ea8c33c41710a3",
-                "credential": "MVHlqr+6T0fkOaOq"
-            },
-            {
-                "urls": ["turns:a.relay.metered.ca:443?transport=tcp"],
-                "username": "89dd60e6a8ea8c33c41710a3",
-                "credential": "MVHlqr+6T0fkOaOq"
-            }
-        ],
-        # Additional configuration for better connectivity
-        "iceCandidatePoolSize": 10,
-        "bundlePolicy": "balanced",
-        "rtcpMuxPolicy": "require"
-    })
+# WebRTC Configuration
+RTC_CONFIGURATION = RTCConfiguration({
+    "iceServers": [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+    ]
+})
 
 # Sidebar Configuration
 with st.sidebar:
@@ -168,35 +107,11 @@ with st.sidebar:
     show_angles = st.checkbox("Tampilkan Sudut", value=True)
     show_confidence = st.checkbox("Tampilkan Confidence", value=True)
     
-    # WebRTC settings
-    st.subheader("Pengaturan WebRTC")
-    video_quality = st.selectbox("Kualitas Video", 
-                                ["Low (320x240)", "Medium (640x480)", "High (1280x720)"], 
-                                index=1)
-    frame_rate = st.selectbox("Frame Rate", [15, 20, 24, 30], index=3)
-    
-    # Connection troubleshooting
-    st.subheader("Troubleshooting")
-    force_relay = st.checkbox("Paksa TURN Relay", 
-                              help="Centang jika koneksi langsung gagal")
-    enable_debug = st.checkbox("Debug Mode", 
-                               help="Tampilkan informasi debug WebRTC")
-    
     # Advanced settings
     with st.expander("Pengaturan Lanjutan"):
         keypoint_threshold = st.slider("Keypoint Threshold", 0.1, 1.0, 0.5, 0.05)
         line_thickness = st.slider("Ketebalan Garis", 1, 5, 2)
         text_scale = st.slider("Skala Teks", 0.3, 1.0, 0.6, 0.1)
-
-# Parse video quality settings
-def get_video_constraints(quality_setting):
-    """Parse video quality setting to constraints"""
-    if quality_setting == "Low (320x240)":
-        return {"width": {"ideal": 320}, "height": {"ideal": 240}}
-    elif quality_setting == "Medium (640x480)":
-        return {"width": {"ideal": 640}, "height": {"ideal": 480}}
-    else:  # High
-        return {"width": {"ideal": 1280}, "height": {"ideal": 720}}
 
 # Model loading
 @st.cache_resource
@@ -310,86 +225,57 @@ def draw_pose_with_label(frame, keypoints_obj, label, box, conf_score):
     return frame
 
 def process_frame_detection(frame):
-    try:
-        results = model.predict(frame, imgsz=image_size, conf=confidence_threshold, save=False, verbose=False)
+    results = model.predict(frame, imgsz=image_size, conf=confidence_threshold, save=False, verbose=False)
 
-        detection_count = 0
-        pose_results = []
+    detection_count = 0
+    pose_results = []
 
-        for result in results:
-            boxes = result.boxes
-            kpts = result.keypoints
-            
-            if boxes is not None and kpts is not None:
-                for box, kp in zip(boxes, kpts):
-                    label = int(box.cls.cpu().item())
-                    conf_score = float(box.conf.cpu().item())
-                    
-                    frame = draw_pose_with_label(frame, kp, label, box, conf_score)
-                    
-                    detection_count += 1
-                    pose_results.append({
-                        'label': CLASS_LABELS.get(label, 'Unknown'),
-                        'confidence': conf_score,
-                        'bbox': box.xyxy[0].cpu().numpy().tolist()
-                    })
+    for result in results:
+        boxes = result.boxes
+        kpts = result.keypoints
+        
+        if boxes is not None and kpts is not None:
+            for box, kp in zip(boxes, kpts):
+                label = int(box.cls.cpu().item())
+                conf_score = float(box.conf.cpu().item())
+                
+                frame = draw_pose_with_label(frame, kp, label, box, conf_score)
+                
+                detection_count += 1
+                pose_results.append({
+                    'label': CLASS_LABELS.get(label, 'Unknown'),
+                    'confidence': conf_score,
+                    'bbox': box.xyxy[0].cpu().numpy().tolist()
+                })
 
-        return frame, detection_count, pose_results
-    except Exception as e:
-        if enable_debug:
-            st.error(f"Error dalam pemrosesan frame: {str(e)}")
-        return frame, 0, []
+    return frame, detection_count, pose_results
 
-# Enhanced WebRTC Video Transformer Class
+# WebRTC Video Transformer Class
 class PoseDetectionTransformer(VideoTransformerBase):
     def __init__(self):
         self.frame_count = 0
         self.detection_count = 0
         self.good_posture_count = 0
         self.bad_posture_count = 0
-        self.processing_time = 0
-        self.last_fps_update = time.time()
-        self.fps = 0
     
     def transform(self, frame):
-        start_time = time.time()
+        img = frame.to_ndarray(format="bgr24")
         
-        try:
-            img = frame.to_ndarray(format="bgr24")
-            
-            # Process frame with pose detection
-            processed_img, detection_count, pose_results = process_frame_detection(img)
-            
-            # Update statistics
-            self.frame_count += 1
-            self.detection_count = detection_count
-            
-            # Count posture types
-            for result in pose_results:
-                if result['label'] == 'Postur Baik':
-                    self.good_posture_count += 1
-                else:
-                    self.bad_posture_count += 1
-            
-            # Calculate FPS
-            current_time = time.time()
-            if current_time - self.last_fps_update >= 1.0:
-                self.fps = 1.0 / (current_time - self.last_fps_update + 1e-6)
-                self.last_fps_update = current_time
-            
-            # Add performance info to frame if debug mode is enabled
-            if enable_debug:
-                self.processing_time = time.time() - start_time
-                debug_text = f"FPS: {self.fps:.1f} | Processing: {self.processing_time*1000:.1f}ms"
-                cv2.putText(processed_img, debug_text, (10, 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-            
-            return processed_img
-            
-        except Exception as e:
-            if enable_debug:
-                st.error(f"Transform error: {str(e)}")
-            return img
+        # Process frame with pose detection
+        processed_img, detection_count, pose_results = process_frame_detection(img)
+        
+        # Update statistics
+        self.frame_count += 1
+        self.detection_count = detection_count
+        
+        # Count posture types
+        for result in pose_results:
+            if result['label'] == 'Postur Baik':
+                self.good_posture_count += 1
+            else:
+                self.bad_posture_count += 1
+        
+        return processed_img
 
 def process_image(image):
     if isinstance(image, Image.Image):
@@ -550,27 +436,9 @@ with tab1:
                 else:
                     st.warning("Tidak ada pose yang terdeteksi dalam gambar. Coba sesuaikan confidence threshold.")
 
-# Tab 2: Enhanced Real-time Webcam with WebRTC
+# Tab 2: Real-time Webcam with WebRTC
 with tab2:
     st.subheader("Deteksi Pose Webcam Real-time")
-    
-    # Connection troubleshooting section
-    with st.expander("🔧 Panduan Troubleshooting Koneksi"):
-        st.markdown("""
-        **Jika webcam tidak berfungsi, coba langkah berikut:**
-        
-        1. **Pastikan izin kamera:** Browser meminta akses kamera
-        2. **Cek koneksi internet:** WebRTC memerlukan koneksi yang stabil
-        3. **Gunakan HTTPS:** Beberapa fitur WebRTC hanya bekerja di HTTPS
-        4. **Firewall/Proxy:** Pastikan port WebRTC tidak diblokir
-        5. **Aktifkan 'Paksa TURN Relay'** jika koneksi langsung gagal
-        6. **Coba browser lain:** Chrome/Firefox umumnya paling kompatibel
-        7. **Restart browser** dan coba lagi
-        
-        **Untuk jaringan perusahaan/kampus:**
-        - Aktifkan "Paksa TURN Relay" di sidebar
-        - Minta admin IT untuk membuka port 3478, 5349, dan range UDP 49152-65535
-        """)
     
     # Instructions
     st.markdown("""
@@ -584,44 +452,21 @@ with tab2:
     </div>
     """, unsafe_allow_html=True)
     
-    # Get RTC configuration
-    rtc_config = get_rtc_configuration()
-    
-    # Modify configuration if force relay is enabled
-    if force_relay:
-        rtc_config = RTCConfiguration({
-            **rtc_config.__dict__,
-            "iceTransportPolicy": "relay"  # Force TURN relay
-        })
-        st.info("🔄 Mode TURN Relay aktif - semua koneksi akan melalui server relay")
-    
-    # Get video constraints
-    video_constraints = get_video_constraints(video_quality)
-    video_constraints.update({"frameRate": {"ideal": frame_rate}})
-    
-    # WebRTC Streamer with enhanced configuration
+    # WebRTC Streamer
     webrtc_ctx = webrtc_streamer(
-        key="pose-detection-enhanced",
+        key="pose-detection",
         video_transformer_factory=PoseDetectionTransformer,
-        rtc_configuration=rtc_config,
+        rtc_configuration=RTC_CONFIGURATION,
         media_stream_constraints={
-            "video": video_constraints,
+            "video": {
+                "width": {"ideal": 640},
+                "height": {"ideal": 480},
+                "frameRate": {"ideal": 30}
+            },
             "audio": False
         },
         async_processing=True,
-        video_html_attrs={"style": {"border-radius": "10px"}},
     )
-    
-    # Connection status indicator
-    if webrtc_ctx.state.playing:
-        st.markdown('<div class="connection-status status-connected">🟢 Terhubung dan streaming</div>', 
-                   unsafe_allow_html=True)
-    elif webrtc_ctx.state.signalling:
-        st.markdown('<div class="connection-status status-connecting">🟡 Menghubungkan...</div>', 
-                   unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="connection-status status-failed">🔴 Tidak terhubung</div>', 
-                   unsafe_allow_html=True)
     
     # Real-time statistics
     if webrtc_ctx.video_transformer:
@@ -635,14 +480,6 @@ with tab2:
             st.metric("Total Postur Baik", webrtc_ctx.video_transformer.good_posture_count)
         with col4:
             st.metric("Total Postur Buruk", webrtc_ctx.video_transformer.bad_posture_count)
-        
-        # Performance metrics (if debug enabled)
-        if enable_debug:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("FPS", f"{webrtc_ctx.video_transformer.fps:.1f}")
-            with col2:
-                st.metric("Processing Time", f"{webrtc_ctx.video_transformer.processing_time*1000:.1f}ms")
         
         # Session statistics
         total_postures = webrtc_ctx.video_transformer.good_posture_count + webrtc_ctx.video_transformer.bad_posture_count
@@ -723,101 +560,3 @@ with col3:
     - Toggle opsi tampilan sesuai kebutuhan
     - Periksa pengaturan lanjutan
     """)
-
-# Network troubleshooting section
-st.markdown("---")
-st.subheader("🌐 Troubleshooting Koneksi WebRTC")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.markdown("""
-    **Masalah Umum & Solusi:**
-    
-    🔸 **Kamera tidak muncul**
-    - Refresh halaman dan izinkan akses kamera
-    - Pastikan tidak ada aplikasi lain yang menggunakan kamera
-    - Coba browser yang berbeda (Chrome direkomendasikan)
-    
-    🔸 **Koneksi terputus-putus**
-    - Aktifkan "Paksa TURN Relay" di sidebar
-    - Periksa kestabilan koneksi internet
-    - Turunkan kualitas video ke "Low" atau "Medium"
-    
-    🔸 **Performa lambat**
-    - Turunkan frame rate ke 15-20 FPS
-    - Gunakan ukuran gambar 320px untuk deteksi
-    - Matikan opsi tampilan yang tidak perlu
-    """)
-
-with col2:
-    st.markdown("""
-    **Untuk Jaringan Perusahaan/Kampus:**
-    
-    🔸 **Port yang diperlukan:**
-    - STUN: UDP 3478, 19302
-    - TURN: TCP/UDP 3478, 5349
-    - Media: UDP 49152-65535
-    
-    🔸 **Konfigurasi Firewall:**
-    - Whitelist domain: *.l.google.com
-    - Whitelist TURN servers yang digunakan
-    - Izinkan WebRTC traffic
-    
-    🔸 **Jika masih bermasalah:**
-    - Hubungi admin IT untuk membuka port
-    - Gunakan VPN jika diperlukan
-    - Coba dari jaringan yang berbeda
-    """)
-
-# Additional information
-st.markdown("---")
-with st.expander("ℹ️ Informasi Teknis WebRTC"):
-    st.markdown("""
-    **Konfigurasi STUN/TURN yang digunakan:**
-    
-    - **STUN Servers:** Google STUN servers dan alternatif lainnya
-    - **TURN Servers:** ExpressTurn dan Metered TURN (gratis dengan batasan)
-    - **Protokol:** UDP, TCP, dan TLS untuk maksimum kompatibilitas
-    - **ICE Candidates:** Pool size 10 untuk koneksi yang lebih cepat
-    
-    **Untuk production deployment:**
-    - Gunakan TURN server sendiri untuk performa terbaik
-    - Set up COTURN server di VPS/cloud
-    - Konfigurasi SSL certificate untuk TURNS
-    - Monitor bandwidth usage TURN server
-    
-    **Browser compatibility:**
-    - Chrome/Edge: Full support ✅
-    - Firefox: Full support ✅  
-    - Safari: Partial support ⚠️
-    - Mobile browsers: Limited support ⚠️
-    """)
-
-# Performance monitoring
-if enable_debug:
-    st.markdown("---")
-    st.subheader("🔍 Debug Information")
-    
-    if webrtc_ctx.video_transformer:
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Processing FPS", f"{webrtc_ctx.video_transformer.fps:.1f}")
-        with col2:
-            st.metric("Avg Processing Time", f"{webrtc_ctx.video_transformer.processing_time*1000:.1f}ms")
-        with col3:
-            efficiency = (webrtc_ctx.video_transformer.detection_count / max(webrtc_ctx.video_transformer.frame_count, 1)) * 100
-            st.metric("Detection Rate", f"{efficiency:.1f}%")
-    
-    st.info("Debug mode menampilkan informasi performa real-time pada video stream")
-
-# Footer
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #666; padding: 20px;'>
-    <p><strong>Pose Estimation System v2.0</strong></p>
-    <p>Powered by YOLO v8 & Streamlit WebRTC</p>
-    <p><em>Untuk support teknis, periksa panduan troubleshooting di atas</em></p>
-</div>
-""", unsafe_allow_html=True)
