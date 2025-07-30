@@ -565,7 +565,7 @@ with col3:
 st.markdown("---")
 st.markdown("""
 <div style='text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 10px; margin-top: 2rem;'>
-    <h4 style='color: #2c3e50; margin-bottom: 1rem;'>Sistem Deteksi Pose Bertenaga AI</h4>
+    <h4 style='color: #2c3e50; margin-bottom: 1rem;'>Deteksi posisi duduk</h4>
     <div style='display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;'>
         <div><strong>Teknologi:</strong> YOLO v8 + OpenCV + Streamlit + WebRTC</div>
         <div><strong>Model:</strong> Klasifikasi pose hasil pelatihan khusus</div>
