@@ -7,8 +7,12 @@ import numpy as np
 import math
 from PIL import Image
 import time
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase, RTCConfiguration
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, RTCConfiguration
 import av
+import logging
+
+# Configure logging to suppress unnecessary warnings
+logging.getLogger('ultralytics').setLevel(logging.WARNING)
 
 # Page configuration
 st.set_page_config(
@@ -73,8 +77,8 @@ CLASS_LABELS = {
 }
 
 COLORS = {
-    0: (0, 255, 0),
-    1: (255, 0, 0),
+    0: (0, 255, 0),  # Green for good posture
+    1: (255, 0, 0),  # Red for bad posture
 }
 
 KEYPOINT_CONNECTIONS = [(0, 1), (1, 2)]
@@ -83,11 +87,19 @@ KEYPOINT_CONNECTIONS = [(0, 1), (1, 2)]
 st.markdown('<h1 class="main-header">Pose Estimation</h1>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Analisis postur tubuh dengan deteksi pose-estimation menggunakan YOLO v8</p>', unsafe_allow_html=True)
 
-# WebRTC Configuration
+# Initialize session state for WebRTC statistics
+if 'stats' not in st.session_state:
+    st.session_state.stats = {
+        'frame_count': 0,
+        'detection_count': 0,
+        'good_posture_count': 0,
+        'bad_posture_count': 0
+    }
+
+# WebRTC Configuration - Simplified for better stability
 RTC_CONFIGURATION = RTCConfiguration({
     "iceServers": [
         {"urls": ["stun:stun.l.google.com:19302"]},
-        {"urls": ["stun:stun1.l.google.com:19302"]},
     ]
 })
 
@@ -113,264 +125,343 @@ with st.sidebar:
         line_thickness = st.slider("Ketebalan Garis", 1, 5, 2)
         text_scale = st.slider("Skala Teks", 0.3, 1.0, 0.6, 0.1)
 
-# Model loading
+# Model loading with better error handling
 @st.cache_resource
 def load_model():
-    model_path = "pose2/train2/weights/best.pt"
+    model_paths = [
+        "pose2/train2/weights/best.pt",
+        "best.pt",
+        "yolov8n-pose.pt"  # fallback to default YOLO pose model
+    ]
     
-    if not os.path.exists(model_path):
-        st.error("File model tidak ditemukan: " + model_path)
-        st.info("Pastikan file model ada di direktori yang benar")
-        return None
+    for model_path in model_paths:
+        if os.path.exists(model_path):
+            try:
+                with st.spinner(f"Memuat model dari {model_path}..."):
+                    model = YOLO(model_path)
+                    return model, model_path
+            except Exception as e:
+                st.warning(f"Tidak dapat memuat model dari {model_path}: {str(e)}")
+                continue
     
-    with st.spinner("Memuat model YOLO..."):
-        return YOLO(model_path)
+    # Try to download default YOLO pose model
+    try:
+        st.info("Mencoba mengunduh model YOLO pose default...")
+        model = YOLO("yolov8n-pose.pt")
+        return model, "yolov8n-pose.pt (downloaded)"
+    except Exception as e:
+        st.error(f"Tidak dapat memuat atau mengunduh model: {str(e)}")
+        return None, None
 
 # Load model
-model = load_model()
-
-if model is None:
+model_result = load_model()
+if model_result[0] is None:
+    st.error("Tidak dapat memuat model YOLO. Pastikan file model tersedia.")
     st.stop()
 
-st.sidebar.success("Model berhasil dimuat!")
+model, model_path = model_result
+st.sidebar.success(f"Model berhasil dimuat dari: {model_path}")
 
 def calculate_angle(a, b, c):
+    """Calculate angle between three points"""
     if None in (a, b, c):
         return None
     
-    ba = np.array(a) - np.array(b)
-    bc = np.array(c) - np.array(b)
-    
-    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
-    angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
-    return np.degrees(angle)
+    try:
+        ba = np.array(a) - np.array(b)
+        bc = np.array(c) - np.array(b)
+        
+        # Avoid division by zero
+        norm_ba = np.linalg.norm(ba)
+        norm_bc = np.linalg.norm(bc)
+        
+        if norm_ba == 0 or norm_bc == 0:
+            return None
+        
+        cosine_angle = np.dot(ba, bc) / (norm_ba * norm_bc)
+        cosine_angle = np.clip(cosine_angle, -1.0, 1.0)
+        angle = np.arccos(cosine_angle)
+        return np.degrees(angle)
+    except Exception:
+        return None
 
 def draw_pose_with_label(frame, keypoints_obj, label, box, conf_score):
-    color = COLORS.get(label, (255, 255, 255))
-    label_text = CLASS_LABELS.get(label, "Unknown")
+    """Draw pose keypoints and connections on frame"""
+    try:
+        color = COLORS.get(label, (255, 255, 255))
+        label_text = CLASS_LABELS.get(label, "Unknown")
 
-    keypoints = keypoints_obj.xy[0].cpu().numpy()
-    confs = keypoints_obj.conf[0].cpu().numpy()
-
-    # Draw keypoints
-    pts = []
-    for i, (x, y) in enumerate(keypoints):
-        if i < len(confs) and confs[i] > keypoint_threshold:
-            pt = (int(x), int(y))
-            pts.append(pt)
-            
-            if show_keypoints:
-                cv2.circle(frame, pt, 5, (0, 0, 255), -1)
-                cv2.circle(frame, pt, 6, (255, 255, 255), 2)
+        # Handle different keypoint formats
+        if hasattr(keypoints_obj, 'xy') and keypoints_obj.xy is not None:
+            keypoints = keypoints_obj.xy[0].cpu().numpy()
+            confs = keypoints_obj.conf[0].cpu().numpy() if hasattr(keypoints_obj, 'conf') and keypoints_obj.conf is not None else None
         else:
-            pts.append(None)
+            return frame
 
-    # Draw connections
-    if show_connections:
-        for i, j in KEYPOINT_CONNECTIONS:
-            if i < len(pts) and j < len(pts) and pts[i] and pts[j]:
-                cv2.line(frame, pts[i], pts[j], color, line_thickness)
+        # Draw keypoints
+        pts = []
+        for i, (x, y) in enumerate(keypoints):
+            if confs is None or (i < len(confs) and confs[i] > keypoint_threshold):
+                pt = (int(x), int(y))
+                pts.append(pt)
+                
+                if show_keypoints:
+                    cv2.circle(frame, pt, 5, (0, 0, 255), -1)
+                    cv2.circle(frame, pt, 6, (255, 255, 255), 2)
+            else:
+                pts.append(None)
 
-    # Calculate and display angle
-    if show_angles and len(pts) >= 3 and all(pts[k] for k in [0, 1, 2]):
-        angle = calculate_angle(pts[0], pts[1], pts[2])
-        if angle is not None:
-            pos = pts[1]
-            angle_text = f"{int(angle)}°"
-            
-            (text_width, text_height), _ = cv2.getTextSize(
-                angle_text, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 2
-            )
-            cv2.rectangle(
-                frame, 
-                (pos[0] + 5, pos[1] - text_height - 15), 
-                (pos[0] + text_width + 10, pos[1] - 5), 
-                (0, 0, 0), 
-                -1
-            )
-            
-            cv2.putText(
-                frame, angle_text, 
-                (pos[0] + 8, pos[1] - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, text_scale, (0, 255, 255), 2
-            )
+        # Draw connections
+        if show_connections and len(pts) >= 2:
+            for i, j in KEYPOINT_CONNECTIONS:
+                if i < len(pts) and j < len(pts) and pts[i] and pts[j]:
+                    cv2.line(frame, pts[i], pts[j], color, line_thickness)
 
-    # Draw bounding box and label
-    if box is not None:
-        x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
-        
-        # Draw bounding box
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        
-        # Prepare label text
-        display_text = label_text
-        if show_confidence:
-            display_text += f" ({conf_score:.2f})"
-        
-        # Background for label
-        (text_width, text_height), _ = cv2.getTextSize(
-            display_text, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 2
-        )
-        cv2.rectangle(
-            frame, (x1, y1 - text_height - 10), 
-            (x1 + text_width + 10, y1), color, -1
-        )
-        
-        # Label text
-        cv2.putText(
-            frame, display_text, (x1 + 5, y1 - 5),
-            cv2.FONT_HERSHEY_SIMPLEX, text_scale, (255, 255, 255), 2
-        )
+        # Calculate and display angle
+        if show_angles and len(pts) >= 3 and all(pts[k] for k in [0, 1, 2]):
+            angle = calculate_angle(pts[0], pts[1], pts[2])
+            if angle is not None:
+                pos = pts[1]
+                angle_text = f"{int(angle)}°"
+                
+                (text_width, text_height), _ = cv2.getTextSize(
+                    angle_text, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 2
+                )
+                cv2.rectangle(
+                    frame, 
+                    (pos[0] + 5, pos[1] - text_height - 15), 
+                    (pos[0] + text_width + 10, pos[1] - 5), 
+                    (0, 0, 0), 
+                    -1
+                )
+                
+                cv2.putText(
+                    frame, angle_text, 
+                    (pos[0] + 8, pos[1] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, text_scale, (0, 255, 255), 2
+                )
 
+        # Draw bounding box and label
+        if box is not None:
+            try:
+                x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
+                
+                # Draw bounding box
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                
+                # Prepare label text
+                display_text = label_text
+                if show_confidence:
+                    display_text += f" ({conf_score:.2f})"
+                
+                # Background for label
+                (text_width, text_height), _ = cv2.getTextSize(
+                    display_text, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 2
+                )
+                cv2.rectangle(
+                    frame, (x1, y1 - text_height - 10), 
+                    (x1 + text_width + 10, y1), color, -1
+                )
+                
+                # Label text
+                cv2.putText(
+                    frame, display_text, (x1 + 5, y1 - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, text_scale, (255, 255, 255), 2
+                )
+            except Exception:
+                pass  # Skip if bounding box drawing fails
+
+    except Exception as e:
+        st.error(f"Error in draw_pose_with_label: {str(e)}")
+    
     return frame
 
 def process_frame_detection(frame):
-    results = model.predict(frame, imgsz=image_size, conf=confidence_threshold, save=False, verbose=False)
+    """Process frame for pose detection"""
+    try:
+        results = model.predict(
+            frame, 
+            imgsz=image_size, 
+            conf=confidence_threshold, 
+            save=False, 
+            verbose=False,
+            device='cpu'  # Force CPU to avoid CUDA issues
+        )
 
-    detection_count = 0
-    pose_results = []
+        detection_count = 0
+        pose_results = []
 
-    for result in results:
-        boxes = result.boxes
-        kpts = result.keypoints
-        
-        if boxes is not None and kpts is not None:
-            for box, kp in zip(boxes, kpts):
-                label = int(box.cls.cpu().item())
-                conf_score = float(box.conf.cpu().item())
+        for result in results:
+            if hasattr(result, 'boxes') and hasattr(result, 'keypoints'):
+                boxes = result.boxes
+                kpts = result.keypoints
                 
-                frame = draw_pose_with_label(frame, kp, label, box, conf_score)
-                
-                detection_count += 1
-                pose_results.append({
-                    'label': CLASS_LABELS.get(label, 'Unknown'),
-                    'confidence': conf_score,
-                    'bbox': box.xyxy[0].cpu().numpy().tolist()
-                })
+                if boxes is not None and kpts is not None:
+                    for box, kp in zip(boxes, kpts):
+                        try:
+                            label = int(box.cls.cpu().item())
+                            conf_score = float(box.conf.cpu().item())
+                            
+                            frame = draw_pose_with_label(frame, kp, label, box, conf_score)
+                            
+                            detection_count += 1
+                            pose_results.append({
+                                'label': CLASS_LABELS.get(label, 'Unknown'),
+                                'confidence': conf_score,
+                                'bbox': box.xyxy[0].cpu().numpy().tolist()
+                            })
+                        except Exception as e:
+                            continue  # Skip problematic detections
 
-    return frame, detection_count, pose_results
+        return frame, detection_count, pose_results
+    except Exception as e:
+        st.error(f"Error in process_frame_detection: {str(e)}")
+        return frame, 0, []
 
-# WebRTC Video Transformer Class
-class PoseDetectionTransformer(VideoTransformerBase):
+# WebRTC Video Processor Class (Updated for new streamlit-webrtc)
+class PoseDetectionProcessor(VideoProcessorBase):
     def __init__(self):
         self.frame_count = 0
         self.detection_count = 0
         self.good_posture_count = 0
         self.bad_posture_count = 0
     
-    def transform(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-        
-        # Process frame with pose detection
-        processed_img, detection_count, pose_results = process_frame_detection(img)
-        
-        # Update statistics
-        self.frame_count += 1
-        self.detection_count = detection_count
-        
-        # Count posture types
-        for result in pose_results:
-            if result['label'] == 'Postur Baik':
-                self.good_posture_count += 1
-            else:
-                self.bad_posture_count += 1
-        
-        return processed_img
+    def recv(self, frame):
+        try:
+            img = frame.to_ndarray(format="bgr24")
+            
+            # Process frame with pose detection
+            processed_img, detection_count, pose_results = process_frame_detection(img)
+            
+            # Update statistics
+            self.frame_count += 1
+            self.detection_count = detection_count
+            
+            # Count posture types
+            for result in pose_results:
+                if result['label'] == 'Postur Baik':
+                    self.good_posture_count += 1
+                else:
+                    self.bad_posture_count += 1
+            
+            # Update session state
+            st.session_state.stats.update({
+                'frame_count': self.frame_count,
+                'detection_count': self.detection_count,
+                'good_posture_count': self.good_posture_count,
+                'bad_posture_count': self.bad_posture_count
+            })
+            
+            return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
+        except Exception as e:
+            # Return original frame if processing fails
+            return frame
 
 def process_image(image):
-    if isinstance(image, Image.Image):
-        image_array = np.array(image)
-        if len(image_array.shape) == 3 and image_array.shape[2] == 3:
-            frame = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+    """Process uploaded image for pose detection"""
+    try:
+        if isinstance(image, Image.Image):
+            image_array = np.array(image)
+            if len(image_array.shape) == 3 and image_array.shape[2] == 3:
+                frame = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+            else:
+                frame = image_array
         else:
-            frame = image_array
-    else:
-        frame = image
-    
-    processed_frame, detection_count, pose_results = process_frame_detection(frame)
-    processed_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-    
-    return processed_rgb, detection_count, pose_results
-
-def process_video(video_path):
-    cap = cv2.VideoCapture(video_path)
-    
-    if not cap.isOpened():
-        st.error("Tidak dapat membuka file video")
-        return
-    
-    # Get video properties
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = total_frames / fps if fps > 0 else 0
-    
-    # Display video info
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("FPS", fps)
-    with col2:
-        st.metric("Total Frame", total_frames)
-    with col3:
-        st.metric("Durasi", f"{duration:.1f}s")
-    
-    # Create placeholders
-    video_placeholder = st.empty()
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    # Statistics
-    frame_count = 0
-    total_detections = 0
-    good_posture_count = 0
-    bad_posture_count = 0
-    
-    # Process video frames
-    start_time = time.time()
-    
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+            frame = image
         
         processed_frame, detection_count, pose_results = process_frame_detection(frame)
+        processed_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
         
-        # Update statistics
-        total_detections += detection_count
-        for result in pose_results:
-            if result['label'] == 'Postur Baik':
-                good_posture_count += 1
-            else:
-                bad_posture_count += 1
+        return processed_rgb, detection_count, pose_results
+    except Exception as e:
+        st.error(f"Error processing image: {str(e)}")
+        return np.array(image), 0, []
+
+def process_video(video_path):
+    """Process uploaded video for pose detection"""
+    try:
+        cap = cv2.VideoCapture(video_path)
         
-        # Display processed frame
-        frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-        video_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
+        if not cap.isOpened():
+            st.error("Tidak dapat membuka file video")
+            return
         
-        # Update progress
-        frame_count += 1
-        progress = frame_count / total_frames if total_frames > 0 else 0
-        progress_bar.progress(progress)
+        # Get video properties
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0
         
-        # Update status
-        elapsed_time = time.time() - start_time
-        processing_fps = frame_count / elapsed_time if elapsed_time > 0 else 0
-        status_text.text(f"Memproses frame {frame_count}/{total_frames} | {processing_fps:.1f} FPS")
+        # Display video info
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("FPS", fps)
+        with col2:
+            st.metric("Total Frame", total_frames)
+        with col3:
+            st.metric("Durasi", f"{duration:.1f}s")
+        
+        # Create placeholders
+        video_placeholder = st.empty()
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # Statistics
+        frame_count = 0
+        total_detections = 0
+        good_posture_count = 0
+        bad_posture_count = 0
+        
+        # Process video frames
+        start_time = time.time()
+        
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            processed_frame, detection_count, pose_results = process_frame_detection(frame)
+            
+            # Update statistics
+            total_detections += detection_count
+            for result in pose_results:
+                if result['label'] == 'Postur Baik':
+                    good_posture_count += 1
+                else:
+                    bad_posture_count += 1
+            
+            # Display processed frame every 10 frames to improve performance
+            if frame_count % 10 == 0:
+                frame_rgb = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
+                video_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
+            
+            # Update progress
+            frame_count += 1
+            progress = frame_count / total_frames if total_frames > 0 else 0
+            progress_bar.progress(progress)
+            
+            # Update status
+            elapsed_time = time.time() - start_time
+            processing_fps = frame_count / elapsed_time if elapsed_time > 0 else 0
+            status_text.text(f"Memproses frame {frame_count}/{total_frames} | {processing_fps:.1f} FPS")
+        
+        cap.release()
+        
+        # Final statistics
+        st.success("Pemrosesan video selesai!")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Deteksi", total_detections)
+        with col2:
+            st.metric("Postur Baik", good_posture_count)
+        with col3:
+            st.metric("Postur Buruk", bad_posture_count)
+        with col4:
+            accuracy = (good_posture_count / (good_posture_count + bad_posture_count)) * 100 if (good_posture_count + bad_posture_count) > 0 else 0
+            st.metric("Persentase Postur Baik", f"{accuracy:.1f}%")
     
-    cap.release()
-    
-    # Final statistics
-    st.success("Pemrosesan video selesai!")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Deteksi", total_detections)
-    with col2:
-        st.metric("Postur Baik", good_posture_count)
-    with col3:
-        st.metric("Postur Buruk", bad_posture_count)
-    with col4:
-        accuracy = (good_posture_count / (good_posture_count + bad_posture_count)) * 100 if (good_posture_count + bad_posture_count) > 0 else 0
-        st.metric("Persentase Postur Baik", f"{accuracy:.1f}%")
+    except Exception as e:
+        st.error(f"Error processing video: {str(e)}")
 
 # Main Interface
 st.markdown("---")
@@ -452,45 +543,58 @@ with tab2:
     </div>
     """, unsafe_allow_html=True)
     
-    # WebRTC Streamer
+    # Reset statistics button
+    if st.button("Reset Statistik"):
+        st.session_state.stats = {
+            'frame_count': 0,
+            'detection_count': 0,
+            'good_posture_count': 0,
+            'bad_posture_count': 0
+        }
+        st.success("Statistik telah direset!")
+    
+    # WebRTC Streamer with updated API
     webrtc_ctx = webrtc_streamer(
         key="pose-detection",
-        video_transformer_factory=PoseDetectionTransformer,
+        video_processor_factory=PoseDetectionProcessor,
         rtc_configuration=RTC_CONFIGURATION,
         media_stream_constraints={
             "video": {
                 "width": {"ideal": 640},
                 "height": {"ideal": 480},
-                "frameRate": {"ideal": 30}
+                "frameRate": {"ideal": 15}  # Reduced for better performance
             },
             "audio": False
         },
         async_processing=True,
     )
     
-    # Real-time statistics
-    if webrtc_ctx.video_transformer:
+    # Real-time statistics display
+    stats_placeholder = st.empty()
+    
+    # Update statistics display
+    with stats_placeholder.container():
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Jumlah Frame", webrtc_ctx.video_transformer.frame_count)
+            st.metric("Jumlah Frame", st.session_state.stats['frame_count'])
         with col2:
-            st.metric("Deteksi Saat Ini", webrtc_ctx.video_transformer.detection_count)
+            st.metric("Deteksi Saat Ini", st.session_state.stats['detection_count'])
         with col3:
-            st.metric("Total Postur Baik", webrtc_ctx.video_transformer.good_posture_count)
+            st.metric("Total Postur Baik", st.session_state.stats['good_posture_count'])
         with col4:
-            st.metric("Total Postur Buruk", webrtc_ctx.video_transformer.bad_posture_count)
+            st.metric("Total Postur Buruk", st.session_state.stats['bad_posture_count'])
         
         # Session statistics
-        total_postures = webrtc_ctx.video_transformer.good_posture_count + webrtc_ctx.video_transformer.bad_posture_count
+        total_postures = st.session_state.stats['good_posture_count'] + st.session_state.stats['bad_posture_count']
         if total_postures > 0:
-            good_percentage = (webrtc_ctx.video_transformer.good_posture_count / total_postures) * 100
+            good_percentage = (st.session_state.stats['good_posture_count'] / total_postures) * 100
             
             st.markdown(f"""
             <div class="success-box">
                 <strong>Ringkasan Sesi:</strong><br>
                 Tingkat Postur Baik: {good_percentage:.1f}%<br>
-                Total Frame Diproses: {webrtc_ctx.video_transformer.frame_count}<br>
+                Total Frame Diproses: {st.session_state.stats['frame_count']}<br>
                 Total Deteksi Postur: {total_postures}
             </div>
             """, unsafe_allow_html=True)
@@ -522,11 +626,12 @@ with tab3:
                 tfile.write(uploaded_video.read())
                 temp_video_path = tfile.name
             
-            process_video(temp_video_path)
-            
-            # Clean up temporary file
-            if os.path.exists(temp_video_path):
-                os.unlink(temp_video_path)
+            try:
+                process_video(temp_video_path)
+            finally:
+                # Clean up temporary file
+                if os.path.exists(temp_video_path):
+                    os.unlink(temp_video_path)
 
 # Tips Section
 st.markdown("---")
@@ -561,3 +666,6 @@ with col3:
     - Periksa pengaturan lanjutan
     """)
 
+# Footer
+st.markdown("---")
+st.markdown("**Note:** Aplikasi ini menggunakan YOLO v8 untuk deteksi pose. Performa dapat bervariasi tergantung pada kualitas input dan pengaturan yang dipilih.")
