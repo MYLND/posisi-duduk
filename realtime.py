@@ -80,8 +80,8 @@ COLORS = {
 KEYPOINT_CONNECTIONS = [(0, 1), (1, 2)]
 
 # Header
-st.markdown('<h1 class="main-header">Deteksi dan Klasifikasi Pose</h1>', unsafe_allow_html=True)
-st.markdown('<p class="sub-header">Analisis postur tubuh dengan deteksi pose bertenaga AI menggunakan YOLO v8</p>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">Pose Estimation</h1>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Analisis postur tubuh dengan deteksi pose-estimation menggunakan YOLO v8</p>', unsafe_allow_html=True)
 
 # WebRTC Configuration
 RTC_CONFIGURATION = RTCConfiguration({
@@ -250,15 +250,15 @@ def process_frame_detection(frame):
 
     return frame, detection_count, pose_results
 
-# WebRTC Video Processor Class
-class PoseDetectionProcessor(VideoTransformerBase):
+# WebRTC Video Transformer Class
+class PoseDetectionTransformer(VideoTransformerBase):
     def __init__(self):
         self.frame_count = 0
         self.detection_count = 0
         self.good_posture_count = 0
         self.bad_posture_count = 0
     
-    def recv(self, frame):
+    def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
         
         # Process frame with pose detection
@@ -275,7 +275,7 @@ class PoseDetectionProcessor(VideoTransformerBase):
             else:
                 self.bad_posture_count += 1
         
-        return av.VideoFrame.from_ndarray(processed_img, format="bgr24")
+        return processed_img
 
 def process_image(image):
     if isinstance(image, Image.Image):
@@ -455,7 +455,7 @@ with tab2:
     # WebRTC Streamer
     webrtc_ctx = webrtc_streamer(
         key="pose-detection",
-        video_processor_factory=PoseDetectionProcessor,
+        video_transformer_factory=PoseDetectionTransformer,
         rtc_configuration=RTC_CONFIGURATION,
         media_stream_constraints={
             "video": {
@@ -469,28 +469,28 @@ with tab2:
     )
     
     # Real-time statistics
-    if webrtc_ctx.video_processor:
+    if webrtc_ctx.video_transformer:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Jumlah Frame", webrtc_ctx.video_processor.frame_count)
+            st.metric("Jumlah Frame", webrtc_ctx.video_transformer.frame_count)
         with col2:
-            st.metric("Deteksi Saat Ini", webrtc_ctx.video_processor.detection_count)
+            st.metric("Deteksi Saat Ini", webrtc_ctx.video_transformer.detection_count)
         with col3:
-            st.metric("Total Postur Baik", webrtc_ctx.video_processor.good_posture_count)
+            st.metric("Total Postur Baik", webrtc_ctx.video_transformer.good_posture_count)
         with col4:
-            st.metric("Total Postur Buruk", webrtc_ctx.video_processor.bad_posture_count)
+            st.metric("Total Postur Buruk", webrtc_ctx.video_transformer.bad_posture_count)
         
         # Session statistics
-        total_postures = webrtc_ctx.video_processor.good_posture_count + webrtc_ctx.video_processor.bad_posture_count
+        total_postures = webrtc_ctx.video_transformer.good_posture_count + webrtc_ctx.video_transformer.bad_posture_count
         if total_postures > 0:
-            good_percentage = (webrtc_ctx.video_processor.good_posture_count / total_postures) * 100
+            good_percentage = (webrtc_ctx.video_transformer.good_posture_count / total_postures) * 100
             
             st.markdown(f"""
             <div class="success-box">
                 <strong>Ringkasan Sesi:</strong><br>
                 Tingkat Postur Baik: {good_percentage:.1f}%<br>
-                Total Frame Diproses: {webrtc_ctx.video_processor.frame_count}<br>
+                Total Frame Diproses: {webrtc_ctx.video_transformer.frame_count}<br>
                 Total Deteksi Postur: {total_postures}
             </div>
             """, unsafe_allow_html=True)
@@ -561,18 +561,3 @@ with col3:
     - Periksa pengaturan lanjutan
     """)
 
-# Footer
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; padding: 20px; background-color: #f8f9fa; border-radius: 10px; margin-top: 2rem;'>
-    <h4 style='color: #2c3e50; margin-bottom: 1rem;'>Sistem Deteksi Pose Bertenaga AI</h4>
-    <div style='display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap;'>
-        <div><strong>Teknologi:</strong> YOLO v8 + OpenCV + Streamlit + WebRTC</div>
-        <div><strong>Model:</strong> Klasifikasi pose hasil pelatihan khusus</div>
-        <div><strong>Fitur:</strong> Dukungan webcam real-time</div>
-    </div>
-    <p style='margin-top: 1rem; color: #7f8c8d; font-style: italic;'>
-        Analisis postur manusia dengan teknologi AI terdepan
-    </p>
-</div>
-""", unsafe_allow_html=True)
