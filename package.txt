@@ -5,3 +5,4 @@ libxrender-dev
 libglib2.0-0
 libgtk-3-0
 libgl1-mesa-glx
+libGL.so.1
